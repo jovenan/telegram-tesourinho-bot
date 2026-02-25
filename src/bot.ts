@@ -1,12 +1,12 @@
-import { MESSAGES } from './config'
+import { MESSAGES, AI_MESSAGES, BOT_TOKEN } from './config'
 import { addExpense, getSources, getCategories } from './sheets'
-import type { ConversationState } from './types'
-
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
+import { extractExpenseData } from './anthropic'
+import { getFileUrl, getBestPhotoFileId } from './telegram'
+import type { ConversationState, TelegramPhoto } from './types'
 
 const userState = new Map<number, ConversationState>()
 
-export async function sendMessage(chatId: number, text: string) {
+async function sendMessage(chatId: number, text: string) {
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -18,8 +18,53 @@ function formatCurrency(value: number): string {
   return `R$ ${value.toFixed(2).replace('.', ',')}`
 }
 
+export async function handlePhotoMessage(
+  chatId: number,
+  userId: number,
+  photos: TelegramPhoto[],
+  caption: string | undefined,
+  firstName: string
+): Promise<void> {
+  await sendMessage(chatId, AI_MESSAGES.processing)
+
+  const fileId = getBestPhotoFileId(photos)
+  const imageUrl = await getFileUrl(fileId)
+
+  if (!imageUrl) {
+    await sendMessage(chatId, AI_MESSAGES.error)
+    return
+  }
+
+  const [categories, sources] = await Promise.all([
+    getCategories(),
+    getSources()
+  ])
+
+  const extraction = await extractExpenseData({
+    imageUrl,
+    text: caption,
+    categories,
+    sources
+  })
+
+  if (!extraction) {
+    await sendMessage(chatId, AI_MESSAGES.error)
+    return
+  }
+
+  userState.set(userId, {
+    step: 'waiting_ai_confirmation',
+    data: {},
+    sources,
+    categories,
+    aiExtraction: extraction
+  })
+
+  await sendMessage(chatId, AI_MESSAGES.result(extraction))
+}
+
 export async function handleMessage(chatId: number, userId: number, text: string, firstName: string) {
-  const state = userState.get(userId) || { step: 'start', data: {} }
+  const state = userState.get(userId) || { step: 'start' as const, data: {} }
 
   if (text === '/cancelar') {
     userState.set(userId, { step: 'start', data: {} })
@@ -32,10 +77,48 @@ export async function handleMessage(chatId: number, userId: number, text: string
       if (text === '/start') {
         await sendMessage(chatId, MESSAGES.welcome(firstName))
       } else if (text === '/gasto') {
-        state.step = 'waiting_description'
-        userState.set(userId, state)
+        userState.set(userId, { step: 'waiting_description', data: {} })
         await sendMessage(chatId, MESSAGES.newExpense)
-      } else {
+      }
+      else if (text.startsWith('/ai ')) {
+        const userText = text.slice(4).trim()
+        if (!userText) {
+          await sendMessage(chatId, AI_MESSAGES.noContent)
+          return
+        }
+
+        await sendMessage(chatId, AI_MESSAGES.processing)
+
+        const [categories, sources] = await Promise.all([
+          getCategories(),
+          getSources()
+        ])
+
+        const extraction = await extractExpenseData({
+          text: userText,
+          categories,
+          sources
+        })
+
+        if (!extraction) {
+          await sendMessage(chatId, AI_MESSAGES.error)
+          return
+        }
+
+        userState.set(userId, {
+          step: 'waiting_ai_confirmation',
+          data: {},
+          sources,
+          categories,
+          aiExtraction: extraction
+        })
+
+        await sendMessage(chatId, AI_MESSAGES.result(extraction))
+      }
+      else if (text === '/ai') {
+        await sendMessage(chatId, AI_MESSAGES.noContent)
+      }
+      else {
         await sendMessage(chatId, MESSAGES.invalidCommand)
       }
       break
@@ -114,6 +197,52 @@ export async function handleMessage(chatId: number, userId: number, text: string
         userState.set(userId, { step: 'waiting_description', data: {} })
         await sendMessage(chatId, MESSAGES.restart)
       } else {
+        await sendMessage(chatId, MESSAGES.invalidConfirmation)
+      }
+      break
+
+    case 'waiting_ai_confirmation':
+      const response = text.toLowerCase().trim()
+      const extraction = state.aiExtraction!
+
+      if (response === 'sim') {
+        if (!extraction.source || !extraction.category) {
+          const missing: string[] = []
+          if (!extraction.source) missing.push('fonte')
+          if (!extraction.category) missing.push('categoria')
+          await sendMessage(chatId, AI_MESSAGES.missingFields(missing))
+          return
+        }
+
+        const formattedValue = formatCurrency(extraction.value)
+
+        const success = await addExpense({
+          description: extraction.description,
+          source: extraction.source,
+          category: extraction.category,
+          value: formattedValue
+        })
+
+        await sendMessage(chatId, success ? MESSAGES.success : MESSAGES.error)
+        userState.set(userId, { step: 'start', data: {} })
+      }
+      else if (response === 'não' || response === 'nao') {
+        await sendMessage(chatId, MESSAGES.canceled)
+        userState.set(userId, { step: 'start', data: {} })
+      }
+      else if (response === 'editar') {
+        userState.set(userId, {
+          step: 'waiting_description',
+          data: {
+            description: extraction.description,
+            value: extraction.value.toString()
+          },
+          sources: state.sources,
+          categories: state.categories
+        })
+        await sendMessage(chatId, AI_MESSAGES.editPrompt)
+      }
+      else {
         await sendMessage(chatId, MESSAGES.invalidConfirmation)
       }
       break

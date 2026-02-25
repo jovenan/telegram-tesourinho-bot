@@ -1,10 +1,9 @@
 import { Hono } from 'hono'
-import { handleMessage } from './bot'
+import { handleMessage, handlePhotoMessage } from './bot'
+import { BOT_TOKEN } from './config'
 import type { TelegramUpdate } from './types'
 
 const app = new Hono()
-
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
 
 app.get('/', (c) => {
   return c.text('Telegram Bot is running!')
@@ -13,16 +12,20 @@ app.get('/', (c) => {
 app.post('/webhook', async (c) => {
   const update: TelegramUpdate = await c.req.json()
 
-  if (update.message?.text) {
+  if (update.message) {
     const { message } = update
     const chatId = message.chat.id
     const userId = message.from.id
-    const text = message.text
     const firstName = message.from.first_name
 
-    console.log(`[${firstName}]: ${text}`)
-
-    await handleMessage(chatId, userId, text ?? '', firstName)
+    if (message.photo && message.photo.length > 0) {
+      console.log(`[${firstName}]: 📷 Enviou uma foto`)
+      await handlePhotoMessage(chatId, userId, message.photo, message.caption, firstName)
+    }
+    else if (message.text) {
+      console.log(`[${firstName}]: ${message.text}`)
+      await handleMessage(chatId, userId, message.text, firstName)
+    }
   }
 
   return c.json({ ok: true })
