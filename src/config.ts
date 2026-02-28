@@ -1,5 +1,3 @@
-export const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
-
 export const MESSAGES = {
   welcome: (name: string) =>
     `Olá ${name}! 👋\n\n` +
@@ -40,20 +38,27 @@ export const MESSAGES = {
 export const AI_MESSAGES = {
   processing: '🔄 Analisando sua compra...',
 
-  result: (data: { description: string; source: string | null; category: string | null; value: number }) => {
+  foundMultiple: (count: number) => `📋 <b>Encontrei ${count} gastos!</b>\n\nVou mostrar um por um para você confirmar.`,
+
+  result: (data: { description: string; source: string | null; category: string | null; value: number }, current?: number, total?: number) => {
     const formattedValue = data.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
-    return `📋 <b>Dados extraídos:</b>
+    const header = total && total > 1
+      ? `📋 <b>Gasto ${current}/${total}:</b>`
+      : `📋 <b>Dados extraídos:</b>`
+    return `${header}
 
 📝 <b>Descrição:</b> ${data.description}
 🏦 <b>Fonte:</b> ${data.source || '⚠️ Não identificada'}
 📁 <b>Categoria:</b> ${data.category || '⚠️ Não identificada'}
-💵 <b>Valor:</b> R$ ${formattedValue}
-
-Está correto? Responda:
-• <b>sim</b> - confirmar e salvar
-• <b>não</b> - cancelar
-• <b>editar</b> - ajustar manualmente`
+💵 <b>Valor:</b> R$ ${formattedValue}`
   },
+
+  resultWithAddOption: `
+
+💡 <i>Para adicionar descrição, envie: add [texto]</i>`,
+
+  allDone: (saved: number, total: number) =>
+    `✅ Concluído! ${saved}/${total} gastos foram salvos.`,
 
   error: `❌ Não consegui extrair os dados automaticamente.
 

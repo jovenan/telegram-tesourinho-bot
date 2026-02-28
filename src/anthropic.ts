@@ -1,9 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { ExpenseExtraction } from './types'
-
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!
-})
+import type { Env, ExpenseExtraction } from './types'
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
@@ -19,7 +15,14 @@ function normalizeMediaType(contentType: string): ImageMediaType {
 async function downloadImageAsBase64(url: string): Promise<{ data: string; mediaType: ImageMediaType }> {
   const response = await fetch(url)
   const buffer = await response.arrayBuffer()
-  const base64 = Buffer.from(buffer).toString('base64')
+
+  // Convert ArrayBuffer to base64 without using Node.js Buffer
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  const base64 = btoa(binary)
 
   const contentType = response.headers.get('content-type') || 'image/jpeg'
   const mediaType = normalizeMediaType(contentType)
@@ -27,42 +30,57 @@ async function downloadImageAsBase64(url: string): Promise<{ data: string; media
   return { data: base64, mediaType }
 }
 
-const extractExpenseTool: Anthropic.Tool = {
-  name: 'extract_expense',
-  description: 'Extrai informações de um gasto a partir de texto ou imagem de comprovante',
+const extractExpensesTool: Anthropic.Tool = {
+  name: 'extract_expenses',
+  description: 'Extrai informações de um ou mais gastos a partir de texto ou imagem de comprovante',
   input_schema: {
     type: 'object' as const,
     properties: {
-      description: {
-        type: 'string',
-        description: 'Descrição clara e concisa do gasto (ex: "Almoço no iFood", "Uber para o trabalho")'
-      },
-      category: {
-        type: 'string',
-        description: 'Categoria do gasto baseada na lista fornecida. Se não conseguir identificar, use null'
-      },
-      source: {
-        type: 'string',
-        description: 'Fonte/meio de pagamento baseado na lista fornecida. Se não conseguir identificar, use null'
-      },
-      value: {
-        type: 'number',
-        description: 'Valor numérico do gasto em reais (ex: 29.90). Extrair apenas o número, sem símbolo de moeda'
+      expenses: {
+        type: 'array',
+        description: 'Lista de gastos extraídos',
+        items: {
+          type: 'object',
+          properties: {
+            description: {
+              type: 'string',
+              description: 'SOMENTE o nome do estabelecimento como aparece na imagem. SEM prefixos como "Compra no débito", "Pagamento", "Transferência". Exemplos: "AGROPETHORSE SOROCABA", "UBER *TRIP", "IFOOD *IFOOD"'
+            },
+            category: {
+              type: 'string',
+              description: 'Categoria do gasto baseada na lista fornecida. Se não conseguir identificar, use null'
+            },
+            source: {
+              type: 'string',
+              description: 'Fonte/meio de pagamento baseado na lista fornecida. Se não conseguir identificar, use null'
+            },
+            value: {
+              type: 'number',
+              description: 'Valor numérico do gasto em reais (ex: 29.90). Extrair apenas o número, sem símbolo de moeda'
+            }
+          },
+          required: ['description', 'value']
+        }
       }
     },
-    required: ['description', 'value']
+    required: ['expenses']
   }
 }
 
 interface ExtractExpenseParams {
+  env: Env
   imageUrl?: string
   text?: string
   categories: string[]
   sources: string[]
 }
 
-export async function extractExpenseData(params: ExtractExpenseParams): Promise<ExpenseExtraction | null> {
-  const { imageUrl, text, categories, sources } = params
+export async function extractExpenseData(params: ExtractExpenseParams): Promise<ExpenseExtraction[] | null> {
+  const { env, imageUrl, text, categories, sources } = params
+
+  const client = new Anthropic({
+    apiKey: env.ANTHROPIC_API_KEY
+  })
 
   const content: Anthropic.MessageParam['content'] = []
 
@@ -78,33 +96,51 @@ export async function extractExpenseData(params: ExtractExpenseParams): Promise<
     })
   }
 
-  const prompt = `Analise ${imageUrl ? 'esta imagem de comprovante/nota fiscal' : 'este texto'} e extraia as informações do gasto.
+  const prompt = `Analise ${imageUrl ? 'esta imagem de comprovante/nota fiscal' : 'este texto'} e extraia as informações de TODOS os gastos presentes.
 
 ${text ? `Texto/descrição adicional do usuário: "${text}"` : ''}
 
-CATEGORIAS DISPONÍVEIS (use uma destas quando possível):
-${categories.map((c) => `- ${c}`).join('\n')}
+CATEGORIAS FIXAS (use OBRIGATORIAMENTE uma destas):
+- Mercado
+- Restaurantes e Delivery
+- Transporte
+- Conta de Agua e Luz
+- Moradia
+- Internet e plano telefonico
+- Assinaturas
+- Saúde
+- Lazer
+- Educação
+- Impostos
+- Vestimentas
+- Variados
+- Viagem
+- Presentes
+- Pet
+- Carro
+- Investimentos
 
 FONTES DE PAGAMENTO DISPONÍVEIS (use uma destas quando possível):
 ${sources.map((s) => `- ${s}`).join('\n')}
 
 INSTRUÇÕES:
-1. Extraia o VALOR exato do gasto (número em reais)
-2. Crie uma DESCRIÇÃO clara e concisa
-3. Escolha a CATEGORIA mais adequada da lista acima
-4. Identifique a FONTE de pagamento da lista acima (se visível)
-5. Se não conseguir identificar categoria ou fonte, retorne null para esses campos
+1. Identifique TODOS os gastos presentes na imagem/texto
+2. Para cada gasto, extraia o VALOR exato (número em reais)
+3. A DESCRIÇÃO deve ser SOMENTE o nome do estabelecimento/transação como aparece na imagem, SEM adicionar prefixos como "Compra no débito", "Pagamento", etc. Exemplos corretos: "AGROPETHORSE SOROCABA", "UBER *TRIP", "PAG*JoseDaSilva". Exemplos ERRADOS: "Compra no débito - AGROPETHORSE", "Pagamento via Pix - Loja X".
+4. A CATEGORIA deve ser SEMPRE uma das categorias fixas listadas acima. Escolha a mais adequada.
+5. Identifique a FONTE de pagamento da lista acima (se visível)
+6. Se não conseguir identificar a fonte, retorne null. Para categoria, SEMPRE escolha uma das fixas.
 
-Use a ferramenta extract_expense para retornar os dados estruturados.`
+Use a ferramenta extract_expenses para retornar os dados estruturados.`
 
   content.push({ type: 'text', text: prompt })
 
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      tools: [extractExpenseTool],
-      tool_choice: { type: 'tool', name: 'extract_expense' },
+      max_tokens: 2048,
+      tools: [extractExpensesTool],
+      tool_choice: { type: 'tool', name: 'extract_expenses' },
       messages: [{ role: 'user', content }]
     })
 
@@ -114,18 +150,20 @@ Use a ferramenta extract_expense para retornar os dados estruturados.`
 
     if (toolUseBlock) {
       const input = toolUseBlock.input as {
-        description: string
-        category?: string
-        source?: string
-        value: number
+        expenses: Array<{
+          description: string
+          category?: string
+          source?: string
+          value: number
+        }>
       }
 
-      return {
-        description: input.description,
-        category: input.category && input.category !== 'null' ? input.category : null,
-        source: input.source && input.source !== 'null' ? input.source : 'C6',
-        value: input.value
-      }
+      return input.expenses.map((expense) => ({
+        description: expense.description,
+        category: expense.category && expense.category !== 'null' ? expense.category : null,
+        source: expense.source && expense.source !== 'null' ? expense.source : 'C6',
+        value: expense.value
+      }))
     }
 
     return null

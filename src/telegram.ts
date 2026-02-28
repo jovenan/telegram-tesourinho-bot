@@ -1,4 +1,4 @@
-import { BOT_TOKEN } from './config'
+import type { Env } from './types'
 
 interface TelegramFile {
   ok: boolean
@@ -10,10 +10,10 @@ interface TelegramFile {
   }
 }
 
-export async function getFileUrl(fileId: string): Promise<string | null> {
+export async function getFileUrl(env: Env, fileId: string): Promise<string | null> {
   try {
     const response = await fetch(
-      `https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`
+      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`
     )
 
     const data: TelegramFile = await response.json()
@@ -23,7 +23,7 @@ export async function getFileUrl(fileId: string): Promise<string | null> {
       return null
     }
 
-    return `https://api.telegram.org/file/bot${BOT_TOKEN}/${data.result.file_path}`
+    return `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${data.result.file_path}`
   } catch (error) {
     console.error('Erro ao obter URL do arquivo:', error)
     return null

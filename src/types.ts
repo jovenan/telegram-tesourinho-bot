@@ -1,3 +1,13 @@
+export interface Env {
+  TELEGRAM_BOT_TOKEN: string
+  TELEGRAM_WEBHOOK_SECRET: string
+  ANTHROPIC_API_KEY: string
+  GOOGLE_CLIENT_EMAIL: string
+  GOOGLE_PRIVATE_KEY: string
+  GOOGLE_SPREADSHEET_ID: string
+  GOOGLE_SHEET_NAME: string
+}
+
 export interface ExpenseExtraction {
   description: string
   category: string | null
@@ -30,9 +40,21 @@ export interface TelegramMessage {
   caption?: string
 }
 
+export interface TelegramCallbackQuery {
+  id: string
+  from: {
+    id: number
+    first_name: string
+    username?: string
+  }
+  message?: TelegramMessage
+  data?: string
+}
+
 export interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
+  callback_query?: TelegramCallbackQuery
 }
 
 export interface ConversationState {
@@ -44,10 +66,16 @@ export interface ConversationState {
     | 'waiting_value'
     | 'waiting_confirmation'
     | 'waiting_ai_confirmation'
+    | 'editing_description'
+    | 'editing_value'
+    | 'editing_source'
+    | 'editing_category'
   data: Record<string, string>
   sources?: string[]
   categories?: string[]
   aiExtraction?: ExpenseExtraction
+  aiExtractions?: ExpenseExtraction[]
+  currentExtractionIndex?: number
 }
 
 export interface Expense {
@@ -55,4 +83,13 @@ export interface Expense {
   source: string       // Column E
   category: string     // Column F
   value: string        // Column G (format "R$ 29,88")
+}
+
+export interface InlineKeyboardButton {
+  text: string
+  callback_data: string
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][]
 }

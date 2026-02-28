@@ -1,35 +1,169 @@
-import { google } from 'googleapis'
-import type { Expense } from './types'
+import type { Env, Expense } from './types'
 
-const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || ''
-const SHEET_NAME = process.env.GOOGLE_SHEET_NAME || 'Gastos'
+const FIXED_CATEGORIES = [
+  'Mercado',
+  'Restaurantes e Delivery',
+  'Transporte',
+  'Conta de Agua e Luz',
+  'Moradia',
+  'Internet e plano telefonico',
+  'Assinaturas',
+  'Saúde',
+  'Lazer',
+  'Educação',
+  'Impostos',
+  'Vestimentas',
+  'Variados',
+  'Viagem',
+  'Presentes',
+  'Pet',
+  'Carro',
+  'Investimentos'
+]
 
-const credentials = {
-  client_email: process.env.GOOGLE_CLIENT_EMAIL || '',
-  private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
-}
+// Cache for access token
+let accessToken: string | null = null
+let tokenExpiry = 0
 
-const auth = new google.auth.JWT({
-  email: credentials.client_email,
-  key: credentials.private_key,
-  scopes: ['https://www.googleapis.com/auth/spreadsheets']
-})
-
-const sheets = google.sheets({ version: 'v4', auth })
-
-// Cache to avoid fetching on every message
+// Cache for sources
 let sourcesCache: string[] = []
-let categoriesCache: string[] = []
 let lastFetch = 0
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-async function fetchUniqueValues(column: string): Promise<string[]> {
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!${column}:${column}`
+function base64UrlEncode(data: string | ArrayBuffer): string {
+  const bytes = typeof data === 'string'
+    ? new TextEncoder().encode(data)
+    : new Uint8Array(data)
+
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
+async function importPrivateKey(pem: string): Promise<CryptoKey> {
+  const pemContents = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\s/g, '')
+
+  const binaryString = atob(pemContents)
+  const bytes = new Uint8Array(binaryString.length)
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i)
+  }
+
+  return crypto.subtle.importKey(
+    'pkcs8',
+    bytes.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+}
+
+async function createJWT(env: Env): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
+  const privateKey = env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT'
+  }
+
+  const payload = {
+    iss: env.GOOGLE_CLIENT_EMAIL,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600
+  }
+
+  const encodedHeader = base64UrlEncode(JSON.stringify(header))
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload))
+  const unsignedToken = `${encodedHeader}.${encodedPayload}`
+
+  const key = await importPrivateKey(privateKey)
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    new TextEncoder().encode(unsignedToken)
+  )
+
+  const encodedSignature = base64UrlEncode(signature)
+  return `${unsignedToken}.${encodedSignature}`
+}
+
+async function getAccessToken(env: Env): Promise<string> {
+  const now = Date.now()
+
+  if (accessToken && now < tokenExpiry) {
+    return accessToken
+  }
+
+  const jwt = await createJWT(env)
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    })
   })
 
-  const rows = response.data.values || []
+  const data = await response.json() as { access_token: string; expires_in: number }
+
+  accessToken = data.access_token
+  tokenExpiry = now + (data.expires_in * 1000) - 60000 // 1 min buffer
+
+  return accessToken
+}
+
+async function fetchSheetValues(env: Env, range: string): Promise<string[][]> {
+  const token = await getAccessToken(env)
+  const sheetName = env.GOOGLE_SHEET_NAME || 'Gastos'
+  const encodedRange = encodeURIComponent(`${sheetName}!${range}`)
+
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SPREADSHEET_ID}/values/${encodedRange}`,
+    {
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  )
+
+  const data = await response.json() as { values?: string[][] }
+  return data.values || []
+}
+
+async function updateSheetValues(env: Env, range: string, values: string[][]): Promise<boolean> {
+  const token = await getAccessToken(env)
+  const sheetName = env.GOOGLE_SHEET_NAME || 'Gastos'
+  const encodedRange = encodeURIComponent(`${sheetName}!${range}`)
+
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SPREADSHEET_ID}/values/${encodedRange}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ values })
+    }
+  )
+
+  return response.ok
+}
+
+async function fetchUniqueValues(env: Env, column: string): Promise<string[]> {
+  const rows = await fetchSheetValues(env, `${column}:${column}`)
+
   const values = rows
     .flat()
     .filter((v): v is string => typeof v === 'string' && v.trim() !== '')
@@ -38,14 +172,14 @@ async function fetchUniqueValues(column: string): Promise<string[]> {
   return Array.from(new Set(values))
 }
 
-export async function getSources(): Promise<string[]> {
+export async function getSources(env: Env): Promise<string[]> {
   const now = Date.now()
   if (sourcesCache.length > 0 && now - lastFetch < CACHE_TTL) {
     return sourcesCache
   }
 
   try {
-    sourcesCache = await fetchUniqueValues('E')
+    sourcesCache = await fetchUniqueValues(env, 'E')
     lastFetch = now
     return sourcesCache
   } catch (error) {
@@ -55,40 +189,20 @@ export async function getSources(): Promise<string[]> {
 }
 
 export async function getCategories(): Promise<string[]> {
-  const now = Date.now()
-  if (categoriesCache.length > 0 && now - lastFetch < CACHE_TTL) {
-    return categoriesCache
-  }
-
-  try {
-    categoriesCache = await fetchUniqueValues('F')
-    lastFetch = now
-    return categoriesCache
-  } catch (error) {
-    console.error('Error fetching categories:', error)
-    return categoriesCache.length > 0 ? categoriesCache : []
-  }
+  return FIXED_CATEGORIES
 }
 
-export async function addExpense(expense: Expense): Promise<boolean> {
+export async function addExpense(env: Env, expense: Expense): Promise<boolean> {
   try {
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!D:D`
-    })
-
-    const rows = response.data.values || []
+    const rows = await fetchSheetValues(env, 'D:D')
     const nextRow = rows.length + 1
+    const success = await updateSheetValues(
+      env,
+      `D${nextRow}:G${nextRow}`,
+      [[expense.description, expense.source, expense.category, expense.value]]
+    )
 
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!D${nextRow}:G${nextRow}`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [[expense.description, expense.source, expense.category, expense.value]]
-      }
-    })
-    return true
+    return success
   } catch (error) {
     console.error('Error adding expense:', error)
     return false
