@@ -82,7 +82,7 @@ export interface Expense {
   description: string  // Column D
   source: string       // Column E
   category: string     // Column F
-  value: string        // Column G (format "R$ 29,88")
+  value: number | string // Column G (numeric value only)
 }
 
 export interface InlineKeyboardButton {

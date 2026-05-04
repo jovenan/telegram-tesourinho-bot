@@ -172,6 +172,27 @@ async function fetchUniqueValues(env: Env, column: string): Promise<string[]> {
   return Array.from(new Set(values))
 }
 
+function normalizeExpenseValue(value: Expense['value']): number {
+  if (typeof value === 'number') {
+    return value
+  }
+
+  const numericValue = value.replace(/[^\d,.-]/g, '')
+  const lastComma = numericValue.lastIndexOf(',')
+  const lastDot = numericValue.lastIndexOf('.')
+  const decimalSeparator = lastComma > lastDot ? ',' : '.'
+  const thousandsSeparator = decimalSeparator === ',' ? '.' : ','
+  const normalized = numericValue
+    .replace(new RegExp(`\\${thousandsSeparator}`, 'g'), '')
+    .replace(decimalSeparator, '.')
+
+  return Number(normalized)
+}
+
+function formatExpenseValueForSheet(value: number): string {
+  return value.toString().replace('.', ',')
+}
+
 export async function getSources(env: Env): Promise<string[]> {
   const now = Date.now()
   if (sourcesCache.length > 0 && now - lastFetch < CACHE_TTL) {
@@ -196,10 +217,16 @@ export async function addExpense(env: Env, expense: Expense): Promise<boolean> {
   try {
     const rows = await fetchSheetValues(env, 'D:D')
     const nextRow = rows.length + 1
+    const value = normalizeExpenseValue(expense.value)
+
+    if (!Number.isFinite(value)) {
+      throw new Error(`Invalid expense value: ${expense.value}`)
+    }
+
     const success = await updateSheetValues(
       env,
       `D${nextRow}:G${nextRow}`,
-      [[expense.description, expense.source, expense.category, expense.value]]
+      [[expense.description, expense.source, expense.category, formatExpenseValueForSheet(value)]]
     )
 
     return success

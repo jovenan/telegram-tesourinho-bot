@@ -259,7 +259,7 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
           description: state.data.description,
           source: state.data.source,
           category: state.data.category,
-          value: formatCurrency(value)
+          value
         })
 
         await sendMessage(env, chatId, success ? MESSAGES.success : MESSAGES.error)
@@ -319,13 +319,11 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
           finalDescription = `${extraction.description} - ${suffix}`
         }
 
-        const formattedValue = formatCurrency(extraction.value)
-
         const success = await addExpense(env, {
           description: `${finalDescription} - AI GENERATED`,
           source: extraction.source,
           category: extraction.category,
-          value: formattedValue
+          value: extraction.value
         })
 
         if (success) {
@@ -506,13 +504,11 @@ export async function handleCallbackQuery(
       return
     }
 
-    const formattedValue = formatCurrency(extraction.value)
-
     const success = await addExpense(env, {
       description: `${extraction.description} - AI GENERATED`,
       source: extraction.source,
       category: extraction.category,
-      value: formattedValue
+      value: extraction.value
     })
 
     if (success) {
