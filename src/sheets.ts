@@ -1,4 +1,4 @@
-import type { Env, Expense } from './types'
+import type { Env, Expense, TravelExpense } from './types'
 
 const FIXED_CATEGORIES = [
   'Mercado',
@@ -125,9 +125,16 @@ async function getAccessToken(env: Env): Promise<string> {
   return accessToken
 }
 
-async function fetchSheetValues(env: Env, range: string): Promise<string[][]> {
+function getDefaultSheetName(env: Env): string {
+  return env.GOOGLE_SHEET_NAME || 'Gastos'
+}
+
+function getTravelSheetName(env: Env): string {
+  return env.GOOGLE_TRAVEL_SHEET_NAME || 'Viagem'
+}
+
+async function fetchSheetValues(env: Env, range: string, sheetName = getDefaultSheetName(env)): Promise<string[][]> {
   const token = await getAccessToken(env)
-  const sheetName = env.GOOGLE_SHEET_NAME || 'Gastos'
   const encodedRange = encodeURIComponent(`${sheetName}!${range}`)
 
   const response = await fetch(
@@ -141,9 +148,8 @@ async function fetchSheetValues(env: Env, range: string): Promise<string[][]> {
   return data.values || []
 }
 
-async function updateSheetValues(env: Env, range: string, values: string[][]): Promise<boolean> {
+async function updateSheetValues(env: Env, range: string, values: string[][], sheetName = getDefaultSheetName(env)): Promise<boolean> {
   const token = await getAccessToken(env)
-  const sheetName = env.GOOGLE_SHEET_NAME || 'Gastos'
   const encodedRange = encodeURIComponent(`${sheetName}!${range}`)
 
   const response = await fetch(
@@ -233,5 +239,62 @@ export async function addExpense(env: Env, expense: Expense): Promise<boolean> {
   } catch (error) {
     console.error('Error adding expense:', error)
     return false
+  }
+}
+
+function parseSheetNumber(value: string | undefined): number {
+  if (!value) return 0
+  return normalizeExpenseValue(value)
+}
+
+export async function addTravelExpense(env: Env, expense: TravelExpense): Promise<boolean> {
+  try {
+    const sheetName = getTravelSheetName(env)
+    const rows = await fetchSheetValues(env, 'A:A', sheetName)
+    const nextRow = rows.length + 1
+    const value = normalizeExpenseValue(expense.value)
+
+    if (!Number.isFinite(value)) {
+      throw new Error(`Invalid travel expense value: ${expense.value}`)
+    }
+
+    return await updateSheetValues(
+      env,
+      `A${nextRow}:H${nextRow}`,
+      [[
+        expense.date,
+        expense.country,
+        expense.city,
+        expense.person,
+        expense.description,
+        expense.category,
+        expense.source,
+        formatExpenseValueForSheet(value)
+      ]],
+      sheetName
+    )
+  } catch (error) {
+    console.error('Error adding travel expense:', error)
+    return false
+  }
+}
+
+export async function getTravelExpenses(env: Env): Promise<TravelExpense[]> {
+  try {
+    const rows = await fetchSheetValues(env, 'A:H', getTravelSheetName(env))
+
+    return rows.slice(1).map((row) => ({
+      date: row[0] || '',
+      country: row[1] || '',
+      city: row[2] || '',
+      person: row[3] || '',
+      description: row[4] || '',
+      category: row[5] || '',
+      source: row[6] || '',
+      value: parseSheetNumber(row[7])
+    })).filter((expense) => expense.date && Number(expense.value) > 0)
+  } catch (error) {
+    console.error('Error fetching travel expenses:', error)
+    return []
   }
 }

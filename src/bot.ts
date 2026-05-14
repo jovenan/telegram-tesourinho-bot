@@ -1,10 +1,11 @@
 import { MESSAGES, AI_MESSAGES } from './config'
-import { addExpense, getSources, getCategories } from './sheets'
-import { extractExpenseData } from './anthropic'
+import { addExpense, addTravelExpense, getTravelExpenses, getSources, getCategories } from './sheets'
+import { extractExpenseData, extractTravelExpenseData } from './anthropic'
 import { getFileUrl, getBestPhotoFileId } from './telegram'
-import type { Env, ConversationState, TelegramPhoto, InlineKeyboardMarkup } from './types'
+import type { Env, ConversationState, TelegramPhoto, InlineKeyboardMarkup, TravelExpenseExtraction, ExpenseExtraction, TravelExpense } from './types'
 
 const userState = new Map<number, ConversationState>()
+const travelMode = new Map<number, boolean>()
 
 async function sendMessage(env: Env, chatId: number, text: string, replyMarkup?: InlineKeyboardMarkup) {
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -48,6 +49,221 @@ function formatCurrency(value: number): string {
   return `R$ ${value.toFixed(2).replace('.', ',')}`
 }
 
+function formatNumber(value: number): string {
+  return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function getMessageDate(messageDate?: number, timeZone = 'America/Sao_Paulo'): string {
+  const date = messageDate ? new Date(messageDate * 1000) : new Date()
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date)
+}
+
+function getTravelMessageDate(messageDate?: number): string {
+  return getMessageDate(messageDate, 'Europe/Rome')
+}
+
+function normalizeDate(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback
+
+  const trimmed = value.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed
+
+  const brDate = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (brDate) {
+    const [, day, month, year] = brDate
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+
+  return fallback
+}
+
+function formatDateForDisplay(value: string): string {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return value
+  const [, year, month, day] = match
+  return `${day}/${month}/${year}`
+}
+
+function isTravelExtraction(extraction: ExpenseExtraction | TravelExpenseExtraction): extraction is TravelExpenseExtraction {
+  return 'country' in extraction || 'city' in extraction || 'date' in extraction
+}
+
+function travelResultMessage(
+  data: TravelExpenseExtraction,
+  person: string,
+  fallbackDate: string,
+  current?: number,
+  total?: number
+): string {
+  const header = total && total > 1
+    ? `📋 <b>Gasto de viagem ${current}/${total}:</b>`
+    : `📋 <b>Dados de viagem extraídos:</b>`
+  return `${header}
+
+📅 <b>Data:</b> ${formatDateForDisplay(normalizeDate(data.date, fallbackDate))}
+🌍 <b>País:</b> ${data.country || '⚠️ Não identificado'}
+🏙️ <b>Cidade:</b> ${data.city || '⚠️ Não identificada'}
+👤 <b>Pessoa:</b> ${person}
+📝 <b>Descrição:</b> ${data.description}
+🏦 <b>Fonte:</b> ${data.source || '⚠️ Não identificada'}
+📁 <b>Categoria:</b> ${data.category || '⚠️ Não identificada'}
+💵 <b>Valor:</b> ${formatNumber(data.value)}`
+}
+
+function resultMessage(state: ConversationState, extraction: ExpenseExtraction | TravelExpenseExtraction, current: number, total: number): string {
+  if (state.isTravel && isTravelExtraction(extraction)) {
+    return travelResultMessage(extraction, state.person || 'Não identificado', getTravelMessageDate(state.messageDate), current, total)
+  }
+
+  return AI_MESSAGES.result(extraction, current, total)
+}
+
+type TravelGroupKey = 'date' | 'country' | 'city' | 'person' | 'category'
+
+const travelGroupLabels: Record<TravelGroupKey, string> = {
+  date: 'dia',
+  country: 'país',
+  city: 'cidade',
+  person: 'pessoa',
+  category: 'categoria'
+}
+
+function getTravelExpenseValue(expense: TravelExpense): number {
+  return typeof expense.value === 'number' ? expense.value : Number(expense.value) || 0
+}
+
+function buildTravelSummary(expenses: TravelExpense[], groupKey?: TravelGroupKey): string {
+  if (expenses.length === 0) {
+    return 'Não encontrei gastos de viagem salvos.'
+  }
+
+  const total = expenses.reduce((sum, expense) => sum + getTravelExpenseValue(expense), 0)
+
+  if (!groupKey) {
+    return `Total de gastos de viagem: ${formatNumber(total)}`
+  }
+
+  const groups = new Map<string, number>()
+  for (const expense of expenses) {
+    const rawKey = expense[groupKey]
+    const key = rawKey ? String(rawKey) : 'Não identificado'
+    groups.set(key, (groups.get(key) || 0) + getTravelExpenseValue(expense))
+  }
+
+  const rows = Array.from(groups.entries())
+    .sort(([a], [b]) => a.localeCompare(b, 'pt-BR'))
+    .map(([key, value]) => {
+      const label = groupKey === 'date' ? formatDateForDisplay(key) : key
+      return `${label}: ${formatNumber(value)}`
+    })
+    .join('\n')
+
+  return `Gastos por ${travelGroupLabels[groupKey]}:\n\n${rows}\n\nTotal: ${formatNumber(total)}`
+}
+
+function normalizeText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function filterTravelExpensesByToday(expenses: TravelExpense[]): TravelExpense[] {
+  const today = getMessageDate()
+  return expenses.filter((expense) => expense.date === today)
+}
+
+async function sendTravelSummary(env: Env, chatId: number, groupKey?: TravelGroupKey, onlyToday = false): Promise<void> {
+  const expenses = await getTravelExpenses(env)
+  const filtered = onlyToday ? filterTravelExpensesByToday(expenses) : expenses
+  await sendMessage(env, chatId, buildTravelSummary(filtered, groupKey))
+}
+
+async function maybeHandleTravelQuestion(env: Env, chatId: number, text: string): Promise<boolean> {
+  const normalized = normalizeText(text)
+
+  if (!normalized.includes('quanto') && !normalized.includes('gastei') && !normalized.includes('gastamos')) {
+    return false
+  }
+
+  if (normalized.includes('por dia')) {
+    await sendTravelSummary(env, chatId, 'date')
+    return true
+  }
+
+  if (normalized.includes('por pessoa')) {
+    await sendTravelSummary(env, chatId, 'person')
+    return true
+  }
+
+  if (normalized.includes('por pais')) {
+    await sendTravelSummary(env, chatId, 'country')
+    return true
+  }
+
+  if (normalized.includes('por cidade')) {
+    await sendTravelSummary(env, chatId, 'city')
+    return true
+  }
+
+  if (normalized.includes('por categoria')) {
+    await sendTravelSummary(env, chatId, 'category')
+    return true
+  }
+
+  const expenses = await getTravelExpenses(env)
+  const matchingCountry = expenses.find((expense) => expense.country && normalized.includes(normalizeText(expense.country)))
+  if (matchingCountry) {
+    const country = matchingCountry.country
+    await sendMessage(env, chatId, buildTravelSummary(expenses.filter((expense) => expense.country === country)))
+    return true
+  }
+
+  const matchingCity = expenses.find((expense) => expense.city && normalized.includes(normalizeText(expense.city)))
+  if (matchingCity) {
+    const city = matchingCity.city
+    await sendMessage(env, chatId, buildTravelSummary(expenses.filter((expense) => expense.city === city)))
+    return true
+  }
+
+  const matchingPerson = expenses.find((expense) => expense.person && normalized.includes(normalizeText(expense.person)))
+  if (matchingPerson) {
+    const person = matchingPerson.person
+    await sendMessage(env, chatId, buildTravelSummary(expenses.filter((expense) => expense.person === person)))
+    return true
+  }
+
+  return false
+}
+
+async function saveExtraction(env: Env, state: ConversationState, extraction: ExpenseExtraction | TravelExpenseExtraction): Promise<boolean> {
+  if (state.isTravel && isTravelExtraction(extraction)) {
+    const fallbackDate = getTravelMessageDate(state.messageDate)
+    return addTravelExpense(env, {
+      date: normalizeDate(extraction.date, fallbackDate),
+      country: extraction.country || 'Não identificado',
+      city: extraction.city || 'Não identificada',
+      person: state.person || 'Não identificado',
+      description: `${extraction.description} - AI GENERATED`,
+      source: extraction.source || '',
+      category: extraction.category || '',
+      value: extraction.value
+    })
+  }
+
+  return addExpense(env, {
+    description: `${extraction.description} - AI GENERATED`,
+    source: extraction.source || '',
+    category: extraction.category || '',
+    value: extraction.value
+  })
+}
+
 const confirmationButtons: InlineKeyboardMarkup = {
   inline_keyboard: [
     [
@@ -75,10 +291,33 @@ const editFieldButtons: InlineKeyboardMarkup = {
   ]
 }
 
+const travelEditFieldButtons: InlineKeyboardMarkup = {
+  inline_keyboard: [
+    [
+      { text: '📅 Data', callback_data: 'edit_travel_date' },
+      { text: '🌍 País', callback_data: 'edit_travel_country' },
+      { text: '🏙️ Cidade', callback_data: 'edit_travel_city' }
+    ],
+    [
+      { text: '📝 Descrição', callback_data: 'edit_description' },
+      { text: '💵 Valor', callback_data: 'edit_value' }
+    ],
+    [
+      { text: '🏦 Fonte', callback_data: 'edit_source' },
+      { text: '📁 Categoria', callback_data: 'edit_category' }
+    ],
+    [
+      { text: '↩️ Voltar', callback_data: 'edit_back' }
+    ]
+  ]
+}
+
 export async function handlePhotoMessage(
   env: Env,
   chatId: number,
   userId: number,
+  firstName: string,
+  messageDate: number,
   photos: TelegramPhoto[],
   caption: string | undefined
 ): Promise<void> {
@@ -97,33 +336,54 @@ export async function handlePhotoMessage(
     getSources(env)
   ])
 
-  const extractions = await extractExpenseData({
-    env,
-    imageUrl,
-    text: caption,
-    categories,
-    sources
-  })
+  const isTravel = travelMode.get(userId) === true
+  console.log('Processing photo message:', JSON.stringify({
+    chatId,
+    userId,
+    firstName,
+    isTravel,
+    hasCaption: Boolean(caption)
+  }))
+
+  const extractions = isTravel
+    ? await extractTravelExpenseData({
+      env,
+      imageUrl,
+      text: caption,
+      categories,
+      sources
+    })
+    : await extractExpenseData({
+      env,
+      imageUrl,
+      text: caption,
+      categories,
+      sources
+    })
 
   if (!extractions || extractions.length === 0) {
     await sendMessage(env, chatId, AI_MESSAGES.error)
     return
   }
 
-  userState.set(userId, {
+  const nextState: ConversationState = {
     step: 'waiting_ai_confirmation',
     data: { savedCount: '0' },
     sources,
     categories,
     aiExtractions: extractions,
-    currentExtractionIndex: 0
-  })
+    currentExtractionIndex: 0,
+    isTravel,
+    person: firstName,
+    messageDate
+  }
+  userState.set(userId, nextState)
 
   if (extractions.length > 1) {
     await sendMessage(env, chatId, AI_MESSAGES.foundMultiple(extractions.length))
   }
 
-  const message = AI_MESSAGES.result(extractions[0], 1, extractions.length) + AI_MESSAGES.resultWithAddOption
+  const message = resultMessage(nextState, extractions[0], 1, extractions.length) + AI_MESSAGES.resultWithAddOption
   await sendMessage(env, chatId, message, confirmationButtons)
 }
 
@@ -133,6 +393,62 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
   if (text === '/cancelar') {
     userState.set(userId, { step: 'start', data: {} })
     await sendMessage(env, chatId, MESSAGES.canceled)
+    return
+  }
+
+  if (text === '/viagem_on') {
+    travelMode.set(userId, true)
+    console.log('Travel mode enabled:', JSON.stringify({ chatId, userId, firstName }))
+    userState.set(userId, { step: 'start', data: {} })
+    await sendMessage(env, chatId, 'Modo viagem ativado. As próximas fotos serão salvas na aba Viagem Europa.')
+    return
+  }
+
+  if (text === '/viagem_off') {
+    travelMode.set(userId, false)
+    console.log('Travel mode disabled:', JSON.stringify({ chatId, userId, firstName }))
+    userState.set(userId, { step: 'start', data: {} })
+    await sendMessage(env, chatId, 'Modo viagem desativado. As próximas fotos voltam para o fluxo normal.')
+    return
+  }
+
+  if (text === '/viagem_status') {
+    const enabled = travelMode.get(userId) === true
+    await sendMessage(env, chatId, enabled ? 'Modo viagem está ativado.' : 'Modo viagem está desativado.')
+    return
+  }
+
+  if (text === '/viagem_hoje') {
+    await sendTravelSummary(env, chatId, undefined, true)
+    return
+  }
+
+  if (text === '/viagem_dias') {
+    await sendTravelSummary(env, chatId, 'date')
+    return
+  }
+
+  if (text === '/viagem_paises') {
+    await sendTravelSummary(env, chatId, 'country')
+    return
+  }
+
+  if (text === '/viagem_cidades') {
+    await sendTravelSummary(env, chatId, 'city')
+    return
+  }
+
+  if (text === '/viagem_pessoas') {
+    await sendTravelSummary(env, chatId, 'person')
+    return
+  }
+
+  if (text === '/viagem_categorias') {
+    await sendTravelSummary(env, chatId, 'category')
+    return
+  }
+
+  if (state.step === 'start' && await maybeHandleTravelQuestion(env, chatId, text)) {
     return
   }
 
@@ -170,20 +486,21 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
           return
         }
 
-        userState.set(userId, {
+        const nextState: ConversationState = {
           step: 'waiting_ai_confirmation',
           data: { savedCount: '0' },
           sources,
           categories,
           aiExtractions: extractions,
           currentExtractionIndex: 0
-        })
+        }
+        userState.set(userId, nextState)
 
         if (extractions.length > 1) {
           await sendMessage(env, chatId, AI_MESSAGES.foundMultiple(extractions.length))
         }
 
-        const message = AI_MESSAGES.result(extractions[0], 1, extractions.length) + AI_MESSAGES.resultWithAddOption
+        const message = resultMessage(nextState, extractions[0], 1, extractions.length) + AI_MESSAGES.resultWithAddOption
         await sendMessage(env, chatId, message, confirmationButtons)
       }
       else if (text === '/ai') {
@@ -292,7 +609,7 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
             currentExtractionIndex: nextIndex,
             data: { ...state.data, savedCount: savedCount.toString() }
           })
-          const message = AI_MESSAGES.result(extractions[nextIndex], nextIndex + 1, extractions.length) + AI_MESSAGES.resultWithAddOption
+          const message = resultMessage(state, extractions[nextIndex], nextIndex + 1, extractions.length) + AI_MESSAGES.resultWithAddOption
           await sendMessage(env, chatId, message, confirmationButtons)
         } else {
           await sendMessage(env, chatId, AI_MESSAGES.allDone(savedCount, extractions.length))
@@ -319,12 +636,8 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
           finalDescription = `${extraction.description} - ${suffix}`
         }
 
-        const success = await addExpense(env, {
-          description: `${finalDescription} - AI GENERATED`,
-          source: extraction.source,
-          category: extraction.category,
-          value: extraction.value
-        })
+        const extractionToSave = { ...extraction, description: finalDescription }
+        const success = await saveExtraction(env, state, extractionToSave)
 
         if (success) {
           savedCount++
@@ -382,7 +695,7 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
           aiExtractions: extractionsEdit
         })
 
-        const message = AI_MESSAGES.result(extractionsEdit[indexEdit], indexEdit + 1, extractionsEdit.length) + AI_MESSAGES.resultWithAddOption
+        const message = resultMessage(state, extractionsEdit[indexEdit], indexEdit + 1, extractionsEdit.length) + AI_MESSAGES.resultWithAddOption
         await sendMessage(env, chatId, message, confirmationButtons)
       }
       break
@@ -404,7 +717,7 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
         aiExtractions: extractionsVal
       })
 
-      const messageVal = AI_MESSAGES.result(extractionsVal[indexVal], indexVal + 1, extractionsVal.length) + AI_MESSAGES.resultWithAddOption
+      const messageVal = resultMessage(state, extractionsVal[indexVal], indexVal + 1, extractionsVal.length) + AI_MESSAGES.resultWithAddOption
       await sendMessage(env, chatId, messageVal, confirmationButtons)
       break
 
@@ -422,7 +735,7 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
           aiExtractions: extractionsSrc
         })
 
-        const messageSrc = AI_MESSAGES.result(extractionsSrc[indexSrc], indexSrc + 1, extractionsSrc.length) + AI_MESSAGES.resultWithAddOption
+        const messageSrc = resultMessage(state, extractionsSrc[indexSrc], indexSrc + 1, extractionsSrc.length) + AI_MESSAGES.resultWithAddOption
         await sendMessage(env, chatId, messageSrc, confirmationButtons)
       } else {
         await sendMessage(env, chatId, MESSAGES.invalidNumber(sourcesEdit.length))
@@ -443,11 +756,59 @@ export async function handleMessage(env: Env, chatId: number, userId: number, te
           aiExtractions: extractionsCat
         })
 
-        const messageCat = AI_MESSAGES.result(extractionsCat[indexCat], indexCat + 1, extractionsCat.length) + AI_MESSAGES.resultWithAddOption
+        const messageCat = resultMessage(state, extractionsCat[indexCat], indexCat + 1, extractionsCat.length) + AI_MESSAGES.resultWithAddOption
         await sendMessage(env, chatId, messageCat, confirmationButtons)
       } else {
         await sendMessage(env, chatId, MESSAGES.invalidNumber(categoriesEdit.length))
       }
+      break
+
+    case 'editing_travel_date':
+      const extractionsDate = state.aiExtractions || []
+      const indexDate = state.currentExtractionIndex || 0
+      if (isTravelExtraction(extractionsDate[indexDate])) {
+        extractionsDate[indexDate].date = normalizeDate(text, getMessageDate(state.messageDate))
+      }
+
+      userState.set(userId, {
+        ...state,
+        step: 'waiting_ai_confirmation',
+        aiExtractions: extractionsDate
+      })
+
+      await sendMessage(env, chatId, resultMessage(state, extractionsDate[indexDate], indexDate + 1, extractionsDate.length) + AI_MESSAGES.resultWithAddOption, confirmationButtons)
+      break
+
+    case 'editing_travel_country':
+      const extractionsCountry = state.aiExtractions || []
+      const indexCountry = state.currentExtractionIndex || 0
+      if (isTravelExtraction(extractionsCountry[indexCountry])) {
+        extractionsCountry[indexCountry].country = text.trim()
+      }
+
+      userState.set(userId, {
+        ...state,
+        step: 'waiting_ai_confirmation',
+        aiExtractions: extractionsCountry
+      })
+
+      await sendMessage(env, chatId, resultMessage(state, extractionsCountry[indexCountry], indexCountry + 1, extractionsCountry.length) + AI_MESSAGES.resultWithAddOption, confirmationButtons)
+      break
+
+    case 'editing_travel_city':
+      const extractionsCity = state.aiExtractions || []
+      const indexCity = state.currentExtractionIndex || 0
+      if (isTravelExtraction(extractionsCity[indexCity])) {
+        extractionsCity[indexCity].city = text.trim()
+      }
+
+      userState.set(userId, {
+        ...state,
+        step: 'waiting_ai_confirmation',
+        aiExtractions: extractionsCity
+      })
+
+      await sendMessage(env, chatId, resultMessage(state, extractionsCity[indexCity], indexCity + 1, extractionsCity.length) + AI_MESSAGES.resultWithAddOption, confirmationButtons)
       break
   }
 }
@@ -486,7 +847,7 @@ export async function handleCallbackQuery(
         currentExtractionIndex: nextIndex,
         data: { ...state.data, savedCount: savedCount.toString() }
       })
-      const message = AI_MESSAGES.result(extractions[nextIndex], nextIndex + 1, extractions.length) + AI_MESSAGES.resultWithAddOption
+      const message = resultMessage(state, extractions[nextIndex], nextIndex + 1, extractions.length) + AI_MESSAGES.resultWithAddOption
       await sendMessage(env, chatId, message, confirmationButtons)
     } else {
       await sendMessage(env, chatId, AI_MESSAGES.allDone(savedCount, extractions.length))
@@ -504,19 +865,14 @@ export async function handleCallbackQuery(
       return
     }
 
-    const success = await addExpense(env, {
-      description: `${extraction.description} - AI GENERATED`,
-      source: extraction.source,
-      category: extraction.category,
-      value: extraction.value
-    })
+    const success = await saveExtraction(env, state, extraction)
 
     if (success) {
       savedCount++
       state.data.savedCount = savedCount.toString()
     }
 
-    await editMessageText(env, chatId, messageId, AI_MESSAGES.result(extraction, currentIndex + 1, extractions.length) + (success ? '\n\n✅ <b>Salvo!</b>' : '\n\n❌ <b>Erro ao salvar</b>'))
+    await editMessageText(env, chatId, messageId, resultMessage(state, extraction, currentIndex + 1, extractions.length) + (success ? '\n\n✅ <b>Salvo!</b>' : '\n\n❌ <b>Erro ao salvar</b>'))
     await answerCallbackQuery(env, callbackQueryId, success ? 'Salvo!' : 'Erro ao salvar')
 
     if (extractions.length === 1) {
@@ -526,7 +882,7 @@ export async function handleCallbackQuery(
     }
   }
   else if (data === 'skip') {
-    await editMessageText(env, chatId, messageId, AI_MESSAGES.result(extraction, currentIndex + 1, extractions.length) + '\n\n⏭️ <b>Pulado</b>')
+    await editMessageText(env, chatId, messageId, resultMessage(state, extraction, currentIndex + 1, extractions.length) + '\n\n⏭️ <b>Pulado</b>')
     await answerCallbackQuery(env, callbackQueryId, 'Pulado')
 
     if (extractions.length === 1) {
@@ -540,13 +896,13 @@ export async function handleCallbackQuery(
       env,
       chatId,
       messageId,
-      AI_MESSAGES.result(extraction, currentIndex + 1, extractions.length) + '\n\n✏️ <b>O que deseja editar?</b>',
-      editFieldButtons
+      resultMessage(state, extraction, currentIndex + 1, extractions.length) + '\n\n✏️ <b>O que deseja editar?</b>',
+      state.isTravel ? travelEditFieldButtons : editFieldButtons
     )
     await answerCallbackQuery(env, callbackQueryId)
   }
   else if (data === 'edit_back') {
-    const message = AI_MESSAGES.result(extraction, currentIndex + 1, extractions.length) + AI_MESSAGES.resultWithAddOption
+    const message = resultMessage(state, extraction, currentIndex + 1, extractions.length) + AI_MESSAGES.resultWithAddOption
     await editMessageText(env, chatId, messageId, message, confirmationButtons)
     await answerCallbackQuery(env, callbackQueryId)
   }
@@ -588,8 +944,32 @@ export async function handleCallbackQuery(
     const categoryList = categories.map((c, i) => `${i + 1}. ${c}`).join('\n')
     await sendMessage(env, chatId, `📁 Escolha a categoria:\n\n${categoryList}`)
   }
+  else if (data === 'edit_travel_date') {
+    await answerCallbackQuery(env, callbackQueryId)
+    userState.set(userId, {
+      ...state,
+      step: 'editing_travel_date'
+    })
+    await sendMessage(env, chatId, '📅 Digite a data no formato AAAA-MM-DD ou DD/MM/AAAA:')
+  }
+  else if (data === 'edit_travel_country') {
+    await answerCallbackQuery(env, callbackQueryId)
+    userState.set(userId, {
+      ...state,
+      step: 'editing_travel_country'
+    })
+    await sendMessage(env, chatId, '🌍 Digite o país:')
+  }
+  else if (data === 'edit_travel_city') {
+    await answerCallbackQuery(env, callbackQueryId)
+    userState.set(userId, {
+      ...state,
+      step: 'editing_travel_city'
+    })
+    await sendMessage(env, chatId, '🏙️ Digite a cidade:')
+  }
   else if (data === 'edit_all') {
-    await editMessageText(env, chatId, messageId, AI_MESSAGES.result(extraction, currentIndex + 1, extractions.length) + '\n\n✏️ <b>Editando tudo...</b>')
+    await editMessageText(env, chatId, messageId, resultMessage(state, extraction, currentIndex + 1, extractions.length) + '\n\n✏️ <b>Editando tudo...</b>')
     await answerCallbackQuery(env, callbackQueryId)
 
     userState.set(userId, {

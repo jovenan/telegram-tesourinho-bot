@@ -6,9 +6,21 @@ export interface Env {
   GOOGLE_PRIVATE_KEY: string
   GOOGLE_SPREADSHEET_ID: string
   GOOGLE_SHEET_NAME: string
+  GOOGLE_TRAVEL_SHEET_NAME?: string
+  TELEGRAM_ALLOWED_USER_IDS?: string
 }
 
 export interface ExpenseExtraction {
+  description: string
+  category: string | null
+  source: string | null
+  value: number
+}
+
+export interface TravelExpenseExtraction {
+  date: string | null
+  country: string | null
+  city: string | null
   description: string
   category: string | null
   source: string | null
@@ -70,12 +82,18 @@ export interface ConversationState {
     | 'editing_value'
     | 'editing_source'
     | 'editing_category'
+    | 'editing_travel_date'
+    | 'editing_travel_country'
+    | 'editing_travel_city'
   data: Record<string, string>
   sources?: string[]
   categories?: string[]
   aiExtraction?: ExpenseExtraction
-  aiExtractions?: ExpenseExtraction[]
+  aiExtractions?: Array<ExpenseExtraction | TravelExpenseExtraction>
   currentExtractionIndex?: number
+  isTravel?: boolean
+  person?: string
+  messageDate?: number
 }
 
 export interface Expense {
@@ -83,6 +101,17 @@ export interface Expense {
   source: string       // Column E
   category: string     // Column F
   value: number | string // Column G (numeric value only)
+}
+
+export interface TravelExpense {
+  date: string       // Column A
+  country: string    // Column B
+  city: string       // Column C
+  person: string     // Column D
+  description: string // Column E
+  category: string   // Column F
+  source: string     // Column G
+  value: number | string // Column H
 }
 
 export interface InlineKeyboardButton {

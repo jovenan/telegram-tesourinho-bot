@@ -5,6 +5,10 @@ export const MESSAGES = {
     `<b>Comandos:</b>\n` +
     `/gasto - Registrar um gasto manualmente\n` +
     `/ai [texto] - Registrar gasto com IA\n` +
+    `/viagem_on - Ativar modo viagem para fotos\n` +
+    `/viagem_off - Desativar modo viagem\n` +
+    `/viagem_hoje - Ver total da viagem hoje\n` +
+    `/viagem_dias - Ver gastos da viagem por dia\n` +
     `📷 Envie uma foto - Extrair gasto automaticamente\n` +
     `/cancelar - Cancelar operação atual`,
 
