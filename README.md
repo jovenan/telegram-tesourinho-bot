@@ -7,8 +7,6 @@ A Telegram bot to track expenses and save them to Google Sheets, powered by AI f
 - Register expenses manually via conversation flow
 - AI-powered expense extraction from photos (receipts, bank statements)
 - AI-powered expense extraction from text (`/ai` command)
-- Travel mode for saving trip expenses from photos to a separate sheet
-- Travel summaries by day, country, city, person, and category
 - Support for multiple expenses in a single image
 - Inline keyboard buttons for easy confirmation
 - Edit individual fields (description, value, source, category)
@@ -48,7 +46,6 @@ Create a `.dev.vars` file for local development:
 
 ```bash
 TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_ALLOWED_USER_IDS=id,id
 ANTHROPIC_API_KEY=your_anthropic_key
 TELEGRAM_WEBHOOK_SECRET=random_secret_string
 GOOGLE_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
@@ -60,12 +57,10 @@ GOOGLE_SHEET_NAME=Sheet Name
 | Variable | Description |
 |----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
-| `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated Telegram user IDs allowed to use the bot |
 | `ANTHROPIC_API_KEY` | API key from Anthropic |
 | `TELEGRAM_WEBHOOK_SECRET` | Secret for webhook validation |
 | `GOOGLE_SPREADSHEET_ID` | ID from the spreadsheet URL |
 | `GOOGLE_SHEET_NAME` | Sheet tab name (e.g., "Gastos 03/2026") |
-| `GOOGLE_TRAVEL_SHEET_NAME` | Optional travel sheet tab name. Defaults to "Viagem" |
 | `GOOGLE_CLIENT_EMAIL` | Service account email |
 | `GOOGLE_PRIVATE_KEY` | Private key from JSON credentials |
 
@@ -151,35 +146,11 @@ The bot expects these columns:
 
 Sources and categories are read from existing values in columns E and F.
 
-### Travel Spreadsheet Structure
-
-The travel sheet defaults to `Viagem` and expects these columns:
-
-| Column | Content |
-|--------|---------|
-| A | Date |
-| B | Country |
-| C | City |
-| D | Person |
-| E | Description |
-| F | Category |
-| G | Source |
-| H | Value |
-
 ## Commands
 
 - `/start` - Welcome message
 - `/gasto` - Start manual expense registration
 - `/ai [text]` - Extract expense from text using AI
-- `/viagem_on` - Enable travel mode for your next photos
-- `/viagem_off` - Disable travel mode
-- `/viagem_status` - Check if travel mode is enabled
-- `/viagem_hoje` - Show today's travel total
-- `/viagem_dias` - Show travel expenses by day
-- `/viagem_paises` - Show travel expenses by country
-- `/viagem_cidades` - Show travel expenses by city
-- `/viagem_pessoas` - Show travel expenses by person
-- `/viagem_categorias` - Show travel expenses by category
 - `/cancelar` - Cancel current operation
 - Send a photo - Extract expenses from image using AI
 
