@@ -104,8 +104,7 @@ CATEGORIAS FIXAS (use OBRIGATORIAMENTE uma destas):
 - Mercado
 - Restaurantes e Delivery
 - Transporte
-- Conta de Agua e Luz
-- Moradia
+- Despesas Moradia
 - Internet e plano telefonico
 - Assinaturas
 - Saúde
@@ -117,8 +116,15 @@ CATEGORIAS FIXAS (use OBRIGATORIAMENTE uma destas):
 - Viagem
 - Presentes
 - Pet
-- Carro
+- Mecânico
 - Investimentos
+- Casa
+- Combustivel
+- Estacionamento
+- Financiamento
+- Seguro
+- Auto cuidado
+- Filho
 
 FONTES DE PAGAMENTO DISPONÍVEIS (use uma destas quando possível):
 ${sources.map((s) => `- ${s}`).join('\n')}

@@ -4,8 +4,7 @@ const FIXED_CATEGORIES = [
   'Mercado',
   'Restaurantes e Delivery',
   'Transporte',
-  'Conta de Agua e Luz',
-  'Moradia',
+  'Despesas Moradia',
   'Internet e plano telefonico',
   'Assinaturas',
   'Saúde',
@@ -17,8 +16,15 @@ const FIXED_CATEGORIES = [
   'Viagem',
   'Presentes',
   'Pet',
-  'Carro',
-  'Investimentos'
+  'Mecânico',
+  'Investimentos',
+  'Casa',
+  'Combustivel',
+  'Estacionamento',
+  'Financiamento',
+  'Seguro',
+  'Auto cuidado',
+  'Filho'
 ]
 
 // Cache for access token
