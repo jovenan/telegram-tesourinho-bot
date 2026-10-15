@@ -9,3 +9,7 @@ node_modules/
 .wrangler
 
 .claude
+
+# dev environment
+.dev.vars*
+scripts/dev/.chat-state.json

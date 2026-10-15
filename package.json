@@ -1,17 +1,32 @@
 {
   "name": "telegram-api-bot",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "logs": "wrangler tail",
-    "secret": "wrangler secret put"
+    "deploy": "wrangler deploy --env=\"\"",
+    "logs": "wrangler tail --env=\"\"",
+    "secret": "wrangler secret put --env=\"\"",
+    "typecheck": "tsc -p .",
+    "dev:telegram": "bun scripts/dev/fake-telegram.ts",
+    "dev:worker": "wrangler dev --env dev --test-scheduled --var TELEGRAM_BOT_TOKEN:dev --var TELEGRAM_WEBHOOK_SECRET:dev-secret",
+    "dev:chat": "bun scripts/dev/chat.ts",
+    "dev:sheets:setup": "bun scripts/dev/setup-test-sheets.ts",
+    "dev:sheets:seed": "bun scripts/dev/seed-test-sheets.ts",
+    "db:generate": "drizzle-kit generate",
+    "test": "bun test",
+    "setup:telegram": "bun scripts/setup-telegram.ts",
+    "dev:fixtures": "bun scripts/dev/make-fixtures.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
-    "hono": "^4.12.1"
+    "@anthropic-ai/sdk": "^0.135.0",
+    "@grammyjs/auto-retry": "^2.0.2",
+    "drizzle-orm": "^0.45.4",
+    "grammy": "^1.46.0",
+    "hono": "^4.12.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2",
     "wrangler": "^4.69.0"
   }
 }

@@ -5,9 +5,18 @@
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
+    "noEmit": true,
+    "types": [
+      "./worker-configuration.d.ts"
+    ],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
-  }
+    "allowSyntheticDefaultImports": true,
+    "allowJs": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src"
+  ]
 }
