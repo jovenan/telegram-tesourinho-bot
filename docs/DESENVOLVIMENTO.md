@@ -61,6 +61,23 @@ bunx wrangler dev --env dev --test-scheduled --var TELEGRAM_BOT_TOKEN:dev --var 
 
 Os crons são disparados com `bun run dev:chat --cron "<expressão>"` (ver `src/proactive`). Como em chat privado o id do chat é o id do usuário, eles vão para o chat `1`.
 
+## Bot de teste (staging)
+
+Um segundo bot do Telegram (criado no @BotFather só para testes) aponta para o Worker `telegram-api-bot-staging`, com Telegram, Cloudflare e planilha reais. Escritas continuam passando pela aprovação no chat.
+
+```bash
+bun run deploy:staging   # publica o código atual no staging
+bun run logs:staging     # logs ao vivo
+```
+
+Os secrets do staging (token do bot de teste, `ALLOWED_USER_ID`, chaves da Anthropic e do Google, `DEBUG_TOKEN`) ficam só no Cloudflare. Para limitar o staging às abas de teste, adicione `SHEETS_SANDBOX_PREFIX = "TESTE "` em `[env.staging.vars]`.
+
+Para ver o que o agente fez numa conversa:
+
+```bash
+curl -H "Authorization: Bearer $DEBUG_TOKEN" "https://telegram-api-bot-staging.<subdominio>.workers.dev/debug/messages?limit=100"
+```
+
 ## Banco e testes
 
 ```bash

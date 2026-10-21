@@ -3,7 +3,7 @@ import { columnLetter } from '../../sheets/a1'
 import { blank } from '../../sheets/undo'
 import type { Spreadsheet } from '../../sheets/expenses'
 import { defineWriteTool, ToolError } from '../registry'
-import { html, MAX_ROWS_PER_WRITE } from './shared'
+import { assertCleanValues, html, MAX_ROWS_PER_WRITE } from './shared'
 
 interface Plan {
   sheet: string
@@ -12,8 +12,8 @@ interface Plan {
 
 async function nonMonthTab(spreadsheet: Spreadsheet, sheet: string) {
   const tab = await spreadsheet.tab(sheet)
-  if (spreadsheet.isMonthTab(tab.title)) {
-    throw new ToolError('Para abas mensais de gastos use add_expense (gastos) ou add_income (renda).')
+  if (await spreadsheet.isExpenseTab(tab.title)) {
+    throw new ToolError('Para abas de gastos use add_expense (gastos) ou add_income (renda).')
   }
   return tab
 }
@@ -21,7 +21,7 @@ async function nonMonthTab(spreadsheet: Spreadsheet, sheet: string) {
 export const appendRows = defineWriteTool({
   name: 'append_rows',
   description:
-    'Adiciona linhas ao final de uma aba que NÃO é mensal (ex: planejamento, viagem), a partir da coluna A. Valores em formato brasileiro. O usuário aprova antes.',
+    'Adiciona linhas ao final de uma aba que NÃO é de gastos (ex: planejamento, viagem), a partir da coluna A. Valores em formato brasileiro. O usuário aprova antes.',
   kind: 'write',
   input: z.strictObject({
     sheet: z.string().describe('Nome exato da aba'),
@@ -32,6 +32,7 @@ export const appendRows = defineWriteTool({
     const tab = await nonMonthTab(spreadsheet, sheet)
     if (rows.length === 0) throw new ToolError('Nenhuma linha informada.')
     if (rows.length > MAX_ROWS_PER_WRITE) throw new ToolError(`Máximo de ${MAX_ROWS_PER_WRITE} linhas por vez.`)
+    assertCleanValues(rows)
 
     const preview = [`➕ <b>Adicionar ${rows.length} linha(s) em ${html(tab.title)}</b>`, ...rows.slice(0, 20).map((row) => `• ${html(row.join(' · '))}`)]
     if (rows.length > 20) preview.push(`… e mais ${rows.length - 20}`)

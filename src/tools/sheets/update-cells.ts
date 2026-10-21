@@ -1,9 +1,9 @@
 import { z } from 'zod'
-import { EXPENSE_FIRST_ROW, INCOME_ROWS, normalizeMonth } from '../../sheets/expenses'
+import { EXPENSE_FIRST_ROW, INCOME_ROWS } from '../../sheets/expenses'
 import { columnIndex, columnLetter, parseCell, rangeFrom } from '../../sheets/a1'
 import { snapshot } from '../../sheets/undo'
 import { defineWriteTool, ToolError } from '../registry'
-import { assertUnchanged, canonicalOption, html, optionsLoader } from './shared'
+import { assertCleanValues, assertUnchanged, canonicalOption, html, optionsLoader } from './shared'
 
 interface Plan {
   range: string
@@ -16,7 +16,7 @@ const MAX_CELLS = 50
 export const updateCells = defineWriteTool({
   name: 'update_cells',
   description:
-    'Altera células de uma aba a partir de uma célula inicial (ex: corrigir categoria de um gasto: start_cell "F12", values [["Lazer"]]). Em abas mensais só é permitido mexer na tabela de gastos (C–G) e nos lançamentos de renda (A2:B5, apenas se o usuário pedir). Valores em formato brasileiro ("45,90", "15/10/2026"). O usuário aprova antes.',
+    'Altera células existentes de uma aba a partir de uma célula inicial (ex: corrigir categoria de um gasto: start_cell "F12", values [["Lazer"]]). Não use para lançar gastos novos (use add_expense). Em abas de gastos só é permitido mexer na tabela (C–G) e nos lançamentos de renda (A2:B5, apenas se o usuário pedir). Valores em formato brasileiro ("45,90", "15/10/2026"). O usuário aprova antes.',
   kind: 'write',
   input: z.strictObject({
     sheet: z.string().describe('Nome exato da aba'),
@@ -34,20 +34,24 @@ export const updateCells = defineWriteTool({
     if (rows === 0 || columns === 0) throw new ToolError('Nenhum valor informado.')
     if (rows * columns > MAX_CELLS) throw new ToolError(`Máximo de ${MAX_CELLS} células por alteração.`)
     const padded = values.map((row) => Array.from({ length: columns }, (_, c) => row[c] ?? ''))
+    assertCleanValues(padded)
 
-    if (spreadsheet.isMonthTab(tab.title)) {
+    if (start.row + rows - 1 > tab.rowCount || start.column + columns > tab.columnCount) {
+      throw new ToolError(`A aba ${tab.title} tem ${tab.rowCount} linhas e ${tab.columnCount} colunas; a alteração passa disso. Para gastos novos use add_expense, que aumenta a tabela.`)
+    }
+
+    if (await spreadsheet.isExpenseTab(tab.title)) {
       const lastRow = start.row + rows - 1
       const lastColumn = start.column + columns - 1
       const inExpenses = start.column >= columnIndex('C') && lastColumn <= columnIndex('G') && start.row >= EXPENSE_FIRST_ROW
       const inIncome = start.column >= 0 && lastColumn <= columnIndex('B') && start.row >= INCOME_ROWS.first && lastRow <= INCOME_ROWS.last
       if (!inExpenses && !inIncome) {
-        throw new ToolError('Em abas mensais só dá para alterar a tabela de gastos (C–G) ou os lançamentos de renda (A2:B5). O resto do painel é calculado por fórmulas.')
+        throw new ToolError('Em abas de gastos só dá para alterar a tabela (C–G) ou os lançamentos de renda (A2:B5). O resto do painel é calculado por fórmulas.')
       }
 
       // Dropdown columns only accept their list values.
       if (inExpenses) {
-        const month = normalizeMonth(tab.title.slice(-7))!
-        const { sources, categories } = await optionsLoader(spreadsheet)(month)
+        const { sources, categories } = await optionsLoader(spreadsheet)(tab.title)
         padded.forEach((row) =>
           row.forEach((value, c) => {
             const column = start.column + c

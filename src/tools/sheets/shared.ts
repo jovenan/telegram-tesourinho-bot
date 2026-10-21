@@ -29,13 +29,20 @@ export function canonicalOption(value: string, options: string[], label: string)
   return match
 }
 
-// Dropdown options per month, fetched once per tool call.
-export function optionsLoader(spreadsheet: Spreadsheet): (month: string) => Promise<ExpenseOptions> {
+// Dropdown options per expense tab, fetched once per tool call.
+export function optionsLoader(spreadsheet: Spreadsheet): (title: string) => Promise<ExpenseOptions> {
   const cache = new Map<string, Promise<ExpenseOptions>>()
-  return (month) => {
-    if (!cache.has(month)) cache.set(month, spreadsheet.options(month))
-    return cache.get(month)!
+  return (title) => {
+    if (!cache.has(title)) cache.set(title, spreadsheet.optionsIn(title))
+    return cache.get(title)!
   }
+}
+
+// Line breaks and control characters never belong in a cell; they show up when the
+// model's output is garbled, so the write is refused instead of saved.
+export function assertCleanValues(values: string[][]): void {
+  const bad = values.flat().find((value) => /[\u0000-\u001f]/.test(value))
+  if (bad !== undefined) throw new ToolError(`Valor com caractere inválido: ${JSON.stringify(bad)}. Reenvie sem quebras de linha.`)
 }
 
 // Throws if the cells changed since the preview was built.

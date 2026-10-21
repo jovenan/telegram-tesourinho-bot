@@ -7,7 +7,7 @@ import { blank, type UndoOp } from './undo'
 //   C–G  expense table: Data | Gasto | Fonte de saida | Categoria | Valor
 export const EXPENSE_FIRST_ROW = 2
 export const EXPENSE_COLUMNS = 5 // C..G
-export const PANEL_RANGE = 'A1:B30'
+const PANEL_RANGE = 'A1:B30'
 export const INCOME_ROWS = { first: 2, last: 5 }
 // Spare rows added whenever the expense table runs out of space.
 const GROWTH_ROWS = 20
@@ -146,8 +146,26 @@ export function lastUsedRow(descriptions: CellValue[][], firstRow = EXPENSE_FIRS
   return firstRow - 1
 }
 
+const EXPENSE_HEADERS = ['data', 'gasto', 'fonte de saida', 'categoria', 'valor']
+const HEADER_CACHE_MS = 5 * 60_000
+
+export class NotExpenseTabError extends Error {
+  constructor(title: string) {
+    super(`A aba "${title}" não tem o layout de gastos (C–G: Data | Gasto | Fonte de saida | Categoria | Valor).`)
+    this.name = 'NotExpenseTabError'
+  }
+}
+
+const normalizeHeader = (value: CellValue | undefined) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
 export class Spreadsheet {
   readonly prefix: string
+  private headerCache = new Map<string, { at: number; isExpenseTab: boolean }>()
 
   constructor(
     readonly client: SheetsClient,
@@ -158,10 +176,6 @@ export class Spreadsheet {
 
   monthTabTitle(month: string): string {
     return `${this.prefix}Gastos ${month}`
-  }
-
-  isMonthTab(title: string): boolean {
-    return title.startsWith(`${this.prefix}Gastos `) && normalizeMonth(title.slice(`${this.prefix}Gastos `.length)) !== null
   }
 
   async hasTab(title: string): Promise<boolean> {
@@ -184,25 +198,48 @@ export class Spreadsheet {
     return this.client.getValues(this.client.range(title, cells))
   }
 
-  async expenses(month: string): Promise<Expense[]> {
-    const tab = await this.tab(this.monthTabTitle(month))
+  // A tab is an expense tab by its layout, not its name: copies and renamed months
+  // get the same rules (dropdown validation, panel protection, table growth).
+  async isExpenseTab(title: string): Promise<boolean> {
+    const cached = this.headerCache.get(title)
+    if (cached && Date.now() - cached.at < HEADER_CACHE_MS) return cached.isExpenseTab
+
+    await this.tab(title)
+    const [header = []] = await this.client.getValues(this.client.range(title, 'C1:G1'))
+    const isExpenseTab = EXPENSE_HEADERS.every((expected, i) => normalizeHeader(header[i]) === expected)
+    this.headerCache.set(title, { at: Date.now(), isExpenseTab })
+    return isExpenseTab
+  }
+
+  async expenseTab(title: string): Promise<SheetInfo> {
+    const tab = await this.tab(title)
+    if (!(await this.isExpenseTab(title))) throw new NotExpenseTabError(title)
+    return tab
+  }
+
+  async expensesIn(title: string): Promise<Expense[]> {
+    const tab = await this.expenseTab(title)
     const values = await this.client.getValues(this.client.range(tab.title, `C${EXPENSE_FIRST_ROW}:G${tab.rowCount}`))
     return parseExpenseRows(values)
   }
 
-  async panel(month: string): Promise<MonthPanel> {
-    const tab = await this.tab(this.monthTabTitle(month))
+  async panelIn(title: string): Promise<MonthPanel> {
+    const tab = await this.expenseTab(title)
     return parsePanel(await this.client.getValues(this.client.range(tab.title, PANEL_RANGE)))
   }
 
   // Dropdown options of the "Fonte de saida" (E) and "Categoria" (F) columns.
-  async options(month: string): Promise<ExpenseOptions> {
-    const tab = await this.tab(this.monthTabTitle(month))
+  async optionsIn(title: string): Promise<ExpenseOptions> {
+    const tab = await this.expenseTab(title)
     const rules = await this.client.getDataValidation(this.client.range(tab.title, `E${EXPENSE_FIRST_ROW}:F${EXPENSE_FIRST_ROW}`))
     return {
       sources: listValues(rules.find((r) => r.column === 4)?.rule),
       categories: listValues(rules.find((r) => r.column === 5)?.rule)
     }
+  }
+
+  expenses(month: string): Promise<Expense[]> {
+    return this.expensesIn(this.monthTabTitle(month))
   }
 }
 
@@ -211,10 +248,10 @@ export interface ExpenseWrite {
   undo: UndoOp
 }
 
-// Appends rows (C..G values) to a month's expense table, growing the tab if needed.
-export async function appendExpenses(spreadsheet: Spreadsheet, month: string, rows: CellValue[][]): Promise<ExpenseWrite> {
+// Appends rows (C..G values) to an expense tab, growing the table if needed.
+export async function appendExpenses(spreadsheet: Spreadsheet, title: string, rows: CellValue[][]): Promise<ExpenseWrite> {
   const { client } = spreadsheet
-  const tab = await spreadsheet.tab(spreadsheet.monthTabTitle(month))
+  const tab = await spreadsheet.expenseTab(title)
   const descriptions = await client.getValues(client.range(tab.title, `D${EXPENSE_FIRST_ROW}:D${tab.rowCount}`))
   const plan = planExpenseRows(lastUsedRow(descriptions), tab.rowCount, rows.length)
 

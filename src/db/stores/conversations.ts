@@ -1,4 +1,4 @@
-import { and, asc, eq, gte } from 'drizzle-orm'
+import { and, asc, desc, eq, gte } from 'drizzle-orm'
 import type { Db } from '..'
 import type { MessageParam } from '../../agent/types'
 import { conversations, messages } from '../schema'
@@ -36,6 +36,17 @@ export class ConversationStore {
       )
       .orderBy(asc(messages.id))
       .all()
+  }
+
+  // Latest messages across all conversations, newest last (debugging only).
+  recent(limit: number) {
+    return this.db
+      .select({ id: messages.id, conversationId: messages.conversationId, role: messages.role, content: messages.content, createdAt: messages.createdAt })
+      .from(messages)
+      .orderBy(desc(messages.id))
+      .limit(limit)
+      .all()
+      .reverse()
   }
 
   append(conversationId: number, message: MessageParam): number {

@@ -26,8 +26,8 @@ interface PlannedExpense {
 }
 
 interface Plan {
-  groups: Array<{ month: string; tab: string; expenses: PlannedExpense[] }>
-  skipped: Array<{ month: string; description: string }>
+  groups: Array<{ tab: string; expenses: PlannedExpense[] }>
+  skipped: Array<{ tab: string; description: string }>
 }
 
 const expense = z.strictObject({
@@ -42,12 +42,21 @@ const expense = z.strictObject({
 export const addExpense = defineWriteTool({
   name: 'add_expense',
   description:
-    'Lança um ou mais gastos na tabela da aba do mês de cada data. Passe TODOS os gastos de uma vez (foto com vários itens, extrato). Parcelas viram uma linha por mês, com "(k/n)" na descrição. O usuário vê uma prévia e aprova antes de gravar.',
+    'Lança um ou mais gastos na tabela de gastos (C–G). Por padrão cada gasto vai para a aba do mês da sua data; com `sheet`, todos vão para essa aba (ex: uma cópia que o usuário indicou). Passe TODOS os gastos de uma vez (foto com vários itens, extrato). Parcelas viram uma linha por mês, com "(k/n)" na descrição. O usuário vê uma prévia e aprova antes de gravar.',
   kind: 'write',
-  input: z.strictObject({ expenses: z.array(expense).describe('Gastos a lançar') }),
+  input: z.strictObject({
+    expenses: z.array(expense).describe('Gastos a lançar'),
+    sheet: z.string().optional().describe('Nome exato de uma aba com o layout de gastos para lançar tudo nela, em vez da aba do mês de cada data')
+  }),
 
-  async prepare({ expenses }, { spreadsheet }) {
+  async prepare({ expenses, sheet }, { spreadsheet }) {
     if (expenses.length === 0) throw new ToolError('Nenhum gasto informado.')
+    if (sheet) {
+      await spreadsheet.expenseTab(sheet)
+      if (expenses.some((item) => (item.installments ?? 1) > 1)) {
+        throw new ToolError('Parcelas só podem ser lançadas nas abas mensais (uma por mês). Sem `sheet`, ou lance só a parcela atual com "(k/n)" na descrição.')
+      }
+    }
 
     // Expand installments into one entry per month.
     const entries = expenses.flatMap((item) => {
@@ -59,7 +68,7 @@ export const addExpense = defineWriteTool({
         // The suffix is added when writing; drop it if the model already included it.
         const description = item.description.replace(/\s*-\s*AI GENERATED\s*$/i, '').trim()
         return {
-          month: monthOf(when),
+          tab: sheet ?? spreadsheet.monthTabTitle(monthOf(when)),
           date: formatDateParts(when),
           description: count > 1 ? `${description} (${k + 1}/${count})` : description,
           source: item.source,
@@ -75,20 +84,18 @@ export const addExpense = defineWriteTool({
     const options = optionsLoader(spreadsheet)
     const plan: Plan = { groups: [], skipped: [] }
 
-    for (const month of [...new Set(entries.map((entry) => entry.month))]) {
-      const tab = spreadsheet.monthTabTitle(month)
-      const items = entries.filter((entry) => entry.month === month)
+    for (const tab of [...new Set(entries.map((entry) => entry.tab))]) {
+      const items = entries.filter((entry) => entry.tab === tab)
 
       if (!(await spreadsheet.hasTab(tab))) {
-        plan.skipped.push(...items.map((item) => ({ month, description: item.description })))
+        plan.skipped.push(...items.map((item) => ({ tab, description: item.description })))
         continue
       }
 
-      const { sources, categories } = await options(month)
-      const existing = await spreadsheet.expenses(month)
+      const { sources, categories } = await options(tab)
+      const existing = await spreadsheet.expensesIn(tab)
 
       plan.groups.push({
-        month,
         tab,
         expenses: items.map((item) => {
           const duplicate = existing.find((row) => looksDuplicate(row, item))
@@ -105,7 +112,7 @@ export const addExpense = defineWriteTool({
     }
 
     if (plan.groups.length === 0) {
-      throw new ToolError(`Nenhuma das abas existe: ${[...new Set(plan.skipped.map((s) => spreadsheet.monthTabTitle(s.month)))].join(', ')}. Peça ao usuário para criar a aba do mês.`)
+      throw new ToolError(`Nenhuma das abas existe: ${[...new Set(plan.skipped.map((s) => s.tab))].join(', ')}. Peça ao usuário para criar a aba do mês.`)
     }
 
     const count = plan.groups.reduce((n, group) => n + group.expenses.length, 0)
@@ -119,7 +126,7 @@ export const addExpense = defineWriteTool({
       }
     }
     for (const skipped of plan.skipped) {
-      lines.push(`⚠️ Sem a aba ${html(spreadsheet.monthTabTitle(skipped.month))}: "${html(skipped.description)}" não será lançado.`)
+      lines.push(`⚠️ Sem a aba ${html(skipped.tab)}: "${html(skipped.description)}" não será lançado.`)
     }
     if (count > 1) lines.push('', `Total: <b>${brl(total)}</b>`)
 
@@ -132,7 +139,7 @@ export const addExpense = defineWriteTool({
 
     for (const group of plan.groups) {
       const rows: CellValue[][] = group.expenses.map((e) => [e.date, `${e.description}${AI_SUFFIX}`, e.source, e.category, sheetNumber(e.value)])
-      const result = await appendExpenses(spreadsheet, group.month, rows)
+      const result = await appendExpenses(spreadsheet, group.tab, rows)
       undo.push(result.undo)
       written.push(`${group.expenses.length} em ${result.range}`)
     }

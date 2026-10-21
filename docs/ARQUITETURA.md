@@ -19,7 +19,9 @@ O bot deixa de ser um extrator com fluxo fixo e passa a ser um agente com quem s
 ## Produto
 
 ### Conversa
-- Chat livre, tom conversacional. Prévias e confirmações seguem formato fixo e escaneável.
+- Personalidade: o **Grana**, um mordomo financeiro formal e discreto, que trata o usuário por "senhor" e tem um humor seco raro. É uma seção do system prompt (`src/agent/prompt.ts`) e também o tom das mensagens fixas (`src/messages.ts`).
+- Respostas curtas por padrão (1 a 3 frases), sem justificar escolhas nem oferecer mais coisas no fim. A brevidade vale acima da personalidade.
+- Prévias e confirmações seguem formato fixo e escaneável.
 - Histórico por conversa; `/novo` recomeça. Memória de longo prazo (`remember`/`forget`) sobrevive ao `/novo`.
 - Comandos: `/novo`, `/memoria`, `/custo`, `/cancelar`, `/ajuda`. Os fluxos antigos (`/gasto`, `/ai`) saem.
 - Escopo: só finanças e planilha, sem web. Perguntas gerais são respondidas com o conhecimento do modelo.
@@ -57,6 +59,7 @@ O resumo semanal depende da data na coluna C. Lançamentos manuais sem data fica
 ## Planilha
 
 - Abas mensais `Gastos MM/YYYY`, criadas manualmente e com antecedência. O agente avisa se a aba do mês não existir.
+- Uma aba é "de gastos" pelo **layout**, não pelo nome: cabeçalhos `Data | Gasto | Fonte de saida | Categoria | Valor` em C1:G1. Cópias e abas renomeadas recebem as mesmas regras (validação dos dropdowns, proteção do painel, crescimento da tabela). As ferramentas de gastos aceitam o nome de uma dessas abas no campo `sheet`, no lugar do mês.
 - Abas ocultas (meses antigos, faturas, planejamento etc.) não aparecem em `list_sheets` por padrão; o agente acessa quando o usuário pede pelo nome.
 - Cada aba tem duas áreas:
 
@@ -138,11 +141,18 @@ Anexos:
   - o system prompt é congelado por conversa (inclui as memórias daquele momento);
   - data/hora vai como prefixo de cada mensagem do usuário;
   - o `content` das respostas é guardado exatamente como a API devolve;
-  - a conversa guarda um hash das ferramentas; se o código mudar as ferramentas, a próxima mensagem abre uma conversa nova automaticamente.
+  - a conversa guarda uma assinatura (hash das ferramentas + `PROMPT_VERSION` + prefixo de sandbox); se qualquer um mudar, a próxima mensagem abre uma conversa nova automaticamente. Ao editar o texto do prompt, aumente `PROMPT_VERSION`.
 - `tool_choice` forçado (`any`/`tool`) gera 400: usar `auto` + `strict: true`.
 - Schemas `strict` não aceitam `minimum`/`maximum`. O zod os gera para `.int()`, então são removidos na conversão; a validação continua no zod.
 - Compaction sob demanda (beta `compact-2026-09-04`): depois de uma resposta, se a requisição passou de `COMPACT_AT_TOKENS` (60k), o histórico é resumido. O resumo assinado vira o início do histórico (`conversations.summary_message_id`); as mensagens antigas ficam no banco, mas não são mais enviadas.
 - `/cancelar` e recusas fecham o turno com uma mensagem do assistente no histórico, para o modelo não retomar o pedido.
+- Histórico sempre válido: toda chamada de ferramenta precisa de resultado na mensagem seguinte. Por isso:
+  - a aprovação pendente é gravada antes de a prévia ser enviada;
+  - prévias longas são divididas em várias mensagens (o Telegram recusa mais de 4096 caracteres; foi o que quebrou a primeira importação real de CSV);
+  - se a prévia falhar, as escritas viram resultados de erro para o modelo;
+  - chamadas que ficaram sem resultado (passo interrompido) são fechadas antes da próxima chamada;
+  - se a API ainda recusar o histórico, o bot começa uma conversa nova com a última mensagem do usuário;
+  - erros inesperados no alarm não são relançados, para o Cloudflare não repetir o mesmo passo em loop.
 
 ## Dados no Durable Object
 
@@ -226,6 +236,16 @@ Princípios:
 - Crescimento da tabela: com a aba cheia até a última linha, as linhas novas entraram dentro da faixa e a fórmula foi de `G2:G125` para `G2:G147`, com o total correto.
 - Custo: ~US$ 0,004 por chamada ao Sonnet 5.5 (effort medium); uma pergunta usa 1–3 chamadas e um lançamento aprovado, 2–3.
 - Bundle: ~400 KiB gzip (limite do plano free: 3 MB).
+
+## Ambientes
+
+| Ambiente | Onde | Telegram | Planilha |
+|---|---|---|---|
+| `dev` | `wrangler dev` local | falso (`scripts/dev/fake-telegram.ts`) | só abas `TESTE ` (`SHEETS_SANDBOX_PREFIX`) |
+| `staging` | Worker `telegram-api-bot-staging` | bot de teste | planilha real, todas as abas; Workers Logs ligado; sem crons |
+| produção | Worker `telegram-api-bot` | bot real | planilha real; crons ligados |
+
+No staging, `GET /debug/messages` devolve as últimas mensagens da conversa (só texto e nomes de ferramentas) para depurar o comportamento do agente. A rota só existe quando o secret `DEBUG_TOKEN` está configurado e exige `Authorization: Bearer <token>`; em produção esse secret não existe.
 
 ## Pendências conhecidas
 

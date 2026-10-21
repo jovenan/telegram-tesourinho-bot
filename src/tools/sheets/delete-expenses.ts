@@ -4,7 +4,7 @@ import { blank, snapshot, type UndoOp } from '../../sheets/undo'
 import type { CellValue } from '../../sheets/client'
 import { defineWriteTool, ToolError } from '../registry'
 import { assertUnchanged, brl, html, MAX_DELETE_ROWS } from './shared'
-import { monthField, requireMonth } from './month'
+import { expenseTabTitle, tabFields } from './month'
 
 interface Plan {
   rows: Array<{ range: string; before: CellValue[][]; description: string }>
@@ -13,21 +13,20 @@ interface Plan {
 export const deleteExpenses = defineWriteTool({
   name: 'delete_expenses',
   description:
-    'Apaga lançamentos da tabela de gastos de um mês (limpa C–G das linhas indicadas, sem mexer no painel A–B). Use os números de linha de list_expenses. O usuário aprova antes.',
+    'Apaga lançamentos da tabela de gastos de um mês ou de uma aba de gastos (limpa C–G das linhas indicadas, sem mexer no painel A–B). Use os números de linha de list_expenses. O usuário aprova antes.',
   kind: 'write',
   input: z.strictObject({
-    month: monthField,
+    ...tabFields,
     rows: z.array(z.number().int()).describe('Números das linhas a apagar')
   }),
 
-  async prepare({ month, rows }, { spreadsheet }) {
-    const monthLabel = requireMonth(month)
+  async prepare({ month, sheet, rows }, { spreadsheet }) {
+    const tab = expenseTabTitle(spreadsheet, { month, sheet })
     const unique = [...new Set(rows)].sort((a, b) => a - b)
     if (unique.length === 0) throw new ToolError('Nenhuma linha informada.')
     if (unique.length > MAX_DELETE_ROWS) throw new ToolError(`Máximo de ${MAX_DELETE_ROWS} linhas por vez.`)
 
-    const expenses = await spreadsheet.expenses(monthLabel)
-    const tab = spreadsheet.monthTabTitle(monthLabel)
+    const expenses = await spreadsheet.expensesIn(tab)
     const plan: Plan = { rows: [] }
     const lines = [`🗑️ <b>Apagar ${unique.length} ${unique.length === 1 ? 'lançamento' : 'lançamentos'} de ${html(tab)}</b>`]
 

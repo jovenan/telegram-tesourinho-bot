@@ -1,19 +1,19 @@
 import { defineTool } from '../registry'
 import { z } from 'zod'
 import { formatBrl } from '../../sheets/expenses'
-import { monthField, requireMonth } from './month'
+import { expenseTabTitle, tabFields } from './month'
 
 export const monthSummary = defineTool({
   name: 'month_summary',
   description:
     'Resumo de um mês: o painel da planilha (Renda, totais de Gastos por fonte e Saldos, calculados pela própria planilha) e os totais por categoria. Use para perguntas de totais, saldo e "quanto gastei".',
   kind: 'read',
-  input: z.strictObject({ month: monthField }),
-  async execute({ month }, { spreadsheet }) {
-    const monthLabel = requireMonth(month)
-    const [panel, expenses] = await Promise.all([spreadsheet.panel(monthLabel), spreadsheet.expenses(monthLabel)])
+  input: z.strictObject(tabFields),
+  async execute({ month, sheet }, { spreadsheet }) {
+    const title = expenseTabTitle(spreadsheet, { month, sheet })
+    const [panel, expenses] = await Promise.all([spreadsheet.panelIn(title), spreadsheet.expensesIn(title)])
 
-    const lines = [`${spreadsheet.monthTabTitle(monthLabel)}`]
+    const lines = [title]
     for (const section of panel.sections) {
       lines.push('', `${section.title}:`, ...section.entries.map((entry) => `- ${entry.label}: ${entry.value || '-'}`))
     }

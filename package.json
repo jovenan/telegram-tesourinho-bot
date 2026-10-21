@@ -13,7 +13,9 @@
     "db:generate": "drizzle-kit generate",
     "test": "bun test",
     "setup:telegram": "bun scripts/setup-telegram.ts",
-    "dev:fixtures": "bun scripts/dev/make-fixtures.ts"
+    "dev:fixtures": "bun scripts/dev/make-fixtures.ts",
+    "deploy:staging": "wrangler deploy --env staging",
+    "logs:staging": "wrangler tail --env staging"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

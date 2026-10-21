@@ -1,10 +1,10 @@
 export const CHAT_MESSAGES = {
   welcome: (name: string) =>
-    `Olá ${name}! 👋\n\n` +
-    `Sou seu assistente de finanças. Pode conversar comigo normalmente: lançar gastos ("gastei 45 no iFood no C6"), ` +
-    `mandar foto de comprovante ou extrato em CSV/PDF, perguntar quanto gastou, comparar meses.\n\n` +
-    `Antes de mexer na planilha eu sempre mostro uma prévia para você aprovar.\n\n` +
-    `Digite /ajuda para ver os comandos.`,
+    `Às suas ordens${name ? `, ${name}` : ''}. 🎩\n\n` +
+    `Sou o Grana, seu mordomo financeiro. Cuido da planilha de gastos: o senhor pode me dizer o que gastou ` +
+    `("gastei 45 no iFood no C6"), mandar foto de comprovante ou extrato em CSV/PDF, ou perguntar como andam as contas.\n\n` +
+    `Nada é gravado sem que o senhor aprove a prévia.\n\n` +
+    `Os comandos estão em /ajuda.`,
 
   help:
     `<b>Comandos</b>\n` +
@@ -16,18 +16,19 @@ export const CHAT_MESSAGES = {
     `Fora isso, é só escrever, mandar foto (comprovante, extrato) ou arquivo CSV/PDF.\n` +
     `Para desfazer a última alteração, diga "desfaz".`,
 
-  newConversation: '🆕 Conversa nova iniciada.',
-  conversationReset: '🔄 O bot foi atualizado, então comecei uma conversa nova.',
-  nothingToCancel: 'Não há nada em andamento.',
-  canceled: '⏹️ Parei.',
+  newConversation: '🆕 Pois não, começamos do zero.',
+  conversationReset: '🔄 Fui atualizado, senhor, então começamos uma conversa nova.',
+  historyReset: '🔄 Perdão, senhor, tive um problema com o histórico desta conversa; recomecei a partir da sua última mensagem.',
+  nothingToCancel: 'Não há nada em andamento, senhor.',
+  canceled: '⏹️ Como desejar, interrompi.',
   tooManySteps: '⚠️ Essa tarefa precisou de passos demais e eu parei no meio. Tente pedir de forma mais específica.',
   refusal: 'Não posso ajudar com isso.',
   emptyReply: '(sem resposta)',
-  unsupported: 'Ainda não sei lidar com esse tipo de mensagem. Mande texto, foto, CSV ou PDF.',
+  unsupported: 'Lamento, senhor, mas ainda não sei lidar com esse tipo de mensagem. Texto, foto, CSV ou PDF, por gentileza.',
   fileTooLarge: 'Esse arquivo é grande demais para mim (máximo ~1,3 MB). Se for imagem, mande como foto (comprimida); se for extrato, prefira CSV.',
   fileFailed: '❌ Não consegui baixar o arquivo. Tente mandar de novo.',
-  internalError: '❌ Algo deu errado ao processar sua mensagem. Tente novamente.',
-  apiError: '❌ Não consegui falar com a IA agora. Tente de novo em instantes; se persistir, use /novo.',
+  internalError: '❌ Perdão, senhor, algo deu errado. Poderia tentar novamente?',
+  apiError: '❌ Perdão, senhor, não consegui pensar agora. Tente de novo em instantes; se persistir, use /novo.',
 
   approvalExpired: 'Essa confirmação expirou.',
   approved: '✅ <b>Feito</b>',

@@ -27,8 +27,9 @@ import {
 } from './agent/config'
 import { formatUsd, usageDelta } from './agent/cost'
 import { compact, runStep, type StepInput } from './agent/loop'
-import { buildSystemPrompt } from './agent/prompt'
-import type { ContentBlockParam, PendingApproval, ToolResultBlockParam, Usage } from './agent/types'
+import { interruptedResults, lastUserInput, unresolvedToolUses } from './agent/history'
+import { buildSystemPrompt, PROMPT_VERSION } from './agent/prompt'
+import type { ContentBlockParam, MessageParam, PendingApproval, ToolResultBlockParam, Usage } from './agent/types'
 import { runCommand } from './commands'
 import { CHAT_MESSAGES } from './messages'
 import { proactiveAction } from './proactive'
@@ -44,9 +45,12 @@ import { decodeText, parseCsv } from './utils/csv'
 import { messageTimestamp, monthKey, monthLabel } from './utils/dates'
 import type { Env } from './types'
 
-const TOOLS_HASH = toolsHash(TOOLS)
+// A conversation is bound to the tools and prompt it started with.
+const PROMPT_FINGERPRINT = `${toolsHash(TOOLS)}-p${PROMPT_VERSION}`
 const CANCELED_TURN_NOTE = '(Pedido cancelado pelo usuário com /cancelar. Não retome esse pedido a menos que ele peça de novo.)'
 const CSV_SAMPLE_ROWS = 5
+// Room left in each preview message for the status line added after approval.
+const PREVIEW_CHUNK = 3800
 
 // A message the user can't send to the agent (unsupported type, file too large).
 class UserFacingError extends Error {}
@@ -109,6 +113,39 @@ export class ChatDO extends DurableObject<Env> {
     await this.wake()
   }
 
+  // Text-only view of the latest messages for /debug/messages (staging). Images,
+  // PDFs and thinking are left out.
+  async debugMessages(limit: number) {
+    const summarize = (block: any): string | null => {
+      switch (block.type) {
+        case 'text':
+          return block.text
+        case 'tool_use':
+          return `→ ${block.name} ${JSON.stringify(block.input)}`
+        case 'tool_result':
+          return `← ${block.is_error ? 'ERRO ' : ''}${typeof block.content === 'string' ? block.content : JSON.stringify(block.content)}`.slice(0, 600)
+        case 'image':
+        case 'document':
+          return `[${block.type}]`
+        case 'compaction':
+          return `[resumo] ${String(block.content ?? '').slice(0, 300)}`
+        default:
+          return null
+      }
+    }
+
+    return {
+      usage: this.usage.get(monthKey(new Date())),
+      messages: this.conversations.recent(limit).map((m) => ({
+        id: m.id,
+        conversation: m.conversationId,
+        at: new Date(m.createdAt).toISOString(),
+        role: m.role,
+        content: (typeof m.content === 'string' ? [m.content] : m.content.map(summarize)).filter((part) => part !== null)
+      }))
+    }
+  }
+
   async schedule(kind: JobKind): Promise<void> {
     this.jobs.add(kind)
     await this.wake()
@@ -124,6 +161,14 @@ export class ChatDO extends DurableObject<Env> {
         await this.processNextUpdate()
       } else if (state.status === 'idle') {
         await this.processNextJob()
+      }
+    } catch (error) {
+      // An uncaught error would make Cloudflare retry the same step over and over.
+      console.error('Unexpected failure in alarm', error)
+      if (this.runState.get().status === 'running') {
+        this.runState.finishRun()
+        const chatId = this.chatId()
+        if (chatId !== null) await this.send(chatId, CHAT_MESSAGES.internalError).catch(() => {})
       }
     } finally {
       this.processing = false
@@ -206,7 +251,8 @@ export class ChatDO extends DurableObject<Env> {
     }
 
     const conversation = await this.currentConversation(chatId)
-    this.conversations.append(conversation.id, { role: 'user', content })
+    const dangling = unresolvedToolUses(this.conversations.messages(conversation))
+    this.conversations.append(conversation.id, { role: 'user', content: [...interruptedResults(dangling), ...content] })
     this.runState.startRun()
     await this.api.sendChatAction(chatId, 'typing').catch(() => {})
   }
@@ -384,9 +430,9 @@ export class ChatDO extends DurableObject<Env> {
   private async markPreview(pending: PendingApproval, status: string): Promise<void> {
     const chatId = this.chatId()
     if (chatId === null || pending.messageId === null) return
-    const preview = pending.writes.map((w) => w.preview).join('\n\n')
+    const chunks = splitMessage(pending.writes.map((w) => w.preview).join('\n\n'), PREVIEW_CHUNK)
     await this.api
-      .editMessageText(chatId, pending.messageId, `${preview}\n\n${status}`, { parse_mode: 'HTML' })
+      .editMessageText(chatId, pending.messageId, `${chunks[chunks.length - 1]}\n\n${status}`, { parse_mode: 'HTML' })
       .catch((error) => console.warn('Could not update preview', error))
   }
 
@@ -434,19 +480,29 @@ export class ChatDO extends DurableObject<Env> {
 
     await this.api.sendChatAction(chatId, 'typing').catch(() => {})
 
+    // A step that died between saving the model's reply and its tool results left
+    // calls unanswered; close them so the history is valid again.
+    const dangling = unresolvedToolUses(this.conversations.messages(conversation))
+    if (dangling.length > 0) {
+      this.conversations.append(conversation.id, { role: 'user', content: interruptedResults(dangling) })
+    }
+
     const input = { ...this.stepInput(conversation), toolContext: this.toolContext() }
     let result
     try {
       result = await runStep(input)
     } catch (error) {
       console.error('Agent step failed', error)
+      if (error instanceof Anthropic.BadRequestError && (await this.restartConversation(chatId, input.messages))) return
       this.runState.finishRun()
       await this.send(chatId, error instanceof Anthropic.APIError ? CHAT_MESSAGES.apiError : CHAT_MESSAGES.internalError)
       return
     }
 
+    // From here on the reply is saved, so nothing may fail before its tool calls get
+    // results (or a pending approval is recorded).
     this.conversations.append(conversation.id, result.assistant)
-    await this.recordUsage(chatId, input.model, result.usage)
+    await this.recordUsage(chatId, input.model, result.usage).catch((error) => console.error('Usage tracking failed', error))
 
     switch (result.outcome.kind) {
       case 'continue':
@@ -456,10 +512,22 @@ export class ChatDO extends DurableObject<Env> {
 
       case 'approval': {
         const { results, writes } = result.outcome
-        const preview = writes.map((w) => w.preview).join('\n\n')
         const token = crypto.randomUUID().replace(/-/g, '').slice(0, 12)
-        const sent = await this.api.sendMessage(chatId, preview, { parse_mode: 'HTML', reply_markup: approvalKeyboard(token) })
-        this.runState.awaitApproval({ token, messageId: sent.message_id, results, writes })
+        this.runState.awaitApproval({ token, messageId: null, results, writes })
+
+        try {
+          const messageId = await this.sendPreview(chatId, writes.map((w) => w.preview).join('\n\n'), token)
+          this.runState.awaitApproval({ token, messageId, results, writes })
+        } catch (error) {
+          // Without a preview the user can't approve: report it to the model instead.
+          console.error('Preview failed', error)
+          const reason = error instanceof GrammyError ? error.description : String(error)
+          const failed = writes.map((w) =>
+            toolResult(w.toolUseId, `Não consegui mostrar a prévia ao usuário (${reason}). Nada foi gravado. Tente de novo em partes menores.`, true)
+          )
+          this.conversations.append(conversation.id, { role: 'user', content: [...results, ...failed] })
+          this.runState.nextStep(state.step)
+        }
         return
       }
 
@@ -474,6 +542,33 @@ export class ChatDO extends DurableObject<Env> {
         await this.send(chatId, CHAT_MESSAGES.refusal)
         return
     }
+  }
+
+  // Sends a preview in as many messages as needed; the buttons go on the last one,
+  // whose id is returned.
+  private async sendPreview(chatId: number, preview: string, token: string): Promise<number> {
+    const chunks = splitMessage(preview, PREVIEW_CHUNK)
+    let messageId = 0
+    for (const [i, chunk] of chunks.entries()) {
+      const last = i === chunks.length - 1
+      const sent = await this.api.sendMessage(chatId, chunk, { parse_mode: 'HTML', ...(last ? { reply_markup: approvalKeyboard(token) } : {}) })
+      messageId = sent.message_id
+    }
+    return messageId
+  }
+
+  // Last resort when the API rejects the history: start a new conversation with the
+  // user's last message and keep going. Returns false when there is nothing to retry
+  // (or the history was already fresh), so the caller reports the error instead.
+  private async restartConversation(chatId: number, messages: MessageParam[]): Promise<boolean> {
+    const input = lastUserInput(messages)
+    if (input.length === 0 || messages.length <= 1) return false
+
+    const conversation = this.startConversation()
+    this.conversations.append(conversation.id, { role: 'user', content: input })
+    this.runState.startRun()
+    await this.send(chatId, CHAT_MESSAGES.historyReset).catch(() => {})
+    return true
   }
 
   // Replaces a long history with a signed summary. Best effort: on any failure the
@@ -502,12 +597,18 @@ export class ChatDO extends DurableObject<Env> {
     const { conversationId } = this.runState.get()
     const current = conversationId ? this.conversations.get(conversationId) : null
 
-    if (current?.toolsHash === TOOLS_HASH) return current
+    if (current?.toolsHash === this.fingerprint()) return current
 
     // A conversation started with another tool set cannot continue.
     const conversation = this.startConversation()
     if (current) await this.send(chatId, CHAT_MESSAGES.conversationReset)
     return conversation
+  }
+
+  // Tools, prompt version and the tab sandbox all shape the frozen prompt; a change in
+  // any of them starts a new conversation.
+  private fingerprint(): string {
+    return `${PROMPT_FINGERPRINT}-${this.spreadsheet.prefix.trim() || 'all'}`
   }
 
   private startConversation(): Conversation {
@@ -516,7 +617,7 @@ export class ChatDO extends DurableObject<Env> {
       tabPrefix: this.spreadsheet.prefix,
       memories: this.memories.list()
     })
-    const conversation = this.conversations.create(systemPrompt, TOOLS_HASH)
+    const conversation = this.conversations.create(systemPrompt, this.fingerprint())
     this.runState.startConversation(conversation.id)
     return conversation
   }

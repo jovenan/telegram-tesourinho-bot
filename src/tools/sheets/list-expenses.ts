@@ -1,15 +1,10 @@
 import { z } from 'zod'
 import { defineTool } from '../registry'
+import { normalize } from './shared'
 import { formatBrl } from '../../sheets/expenses'
-import { monthField, requireMonth } from './month'
+import { expenseTabTitle, tabFields } from './month'
 
 const MAX_LINES = 200
-
-const normalize = (text: string) =>
-  text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
 
 export const listExpenses = defineTool({
   name: 'list_expenses',
@@ -17,14 +12,14 @@ export const listExpenses = defineTool({
     'Lista os gastos (tabela C–G) da aba de um mês, com número da linha, data, descrição, fonte, categoria e valor. Filtros opcionais por categoria, fonte e texto na descrição. Retorna também quantidade e total dos itens filtrados.',
   kind: 'read',
   input: z.strictObject({
-    month: monthField,
+    ...tabFields,
     category: z.string().optional().describe('Filtra pela categoria exata'),
     source: z.string().optional().describe('Filtra pela fonte de saída exata'),
     text: z.string().optional().describe('Filtra por texto contido na descrição')
   }),
-  async execute({ month, category, source, text }, { spreadsheet }) {
-    const monthLabel = requireMonth(month)
-    const all = await spreadsheet.expenses(monthLabel)
+  async execute({ month, sheet, category, source, text }, { spreadsheet }) {
+    const title = expenseTabTitle(spreadsheet, { month, sheet })
+    const all = await spreadsheet.expensesIn(title)
 
     const filtered = all.filter(
       (expense) =>
@@ -34,7 +29,7 @@ export const listExpenses = defineTool({
     )
 
     const total = filtered.reduce((sum, expense) => sum + (expense.value ?? 0), 0)
-    const header = `${spreadsheet.monthTabTitle(monthLabel)}: ${filtered.length} de ${all.length} gastos, total ${formatBrl(total)}`
+    const header = `${title}: ${filtered.length} de ${all.length} gastos, total ${formatBrl(total)}`
     if (filtered.length === 0) return header
 
     const lines = filtered

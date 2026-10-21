@@ -18,4 +18,6 @@ export interface Env {
   // agent may see or modify ("TESTE ").
   TELEGRAM_API_ROOT?: string
   SHEETS_SANDBOX_PREFIX?: string
+  // Staging only: enables GET /debug/messages.
+  DEBUG_TOKEN?: string
 }

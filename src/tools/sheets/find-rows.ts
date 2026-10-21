@@ -1,14 +1,9 @@
 import { z } from 'zod'
 import { defineTool } from '../registry'
+import { normalize } from './shared'
 import { columnLetter } from '../../sheets/a1'
 
 const MAX_RESULTS = 40
-
-const normalize = (text: string) =>
-  text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
 
 export const findRows = defineTool({
   name: 'find_rows',

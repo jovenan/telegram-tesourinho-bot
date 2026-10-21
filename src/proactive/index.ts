@@ -76,11 +76,11 @@ export async function proactiveAction(kind: ProactiveKind, ctx: ToolContext): Pr
     const { dated } = await expensesIn(spreadsheet, [week])
     const thisWeek = inWeek(dated, week)
     const status = thisWeek.length
-      ? `Até agora esta semana (${weekLabel(week)}) tenho <b>${thisWeek.length}</b> lançamento(s) com data, somando <b>${formatBrl(total(thisWeek))}</b>.`
-      : `Ainda não tenho nenhum lançamento com data nesta semana (${weekLabel(week)}).`
+      ? `Nesta semana (${weekLabel(week)}) constam <b>${thisWeek.length}</b> lançamento(s), somando <b>${formatBrl(total(thisWeek))}</b>.`
+      : `Ainda não consta nenhum lançamento nesta semana (${weekLabel(week)}).`
     return {
       kind: 'message',
-      html: `📝 <b>Lembrete de sábado</b>\n\n${status}\n\nSe faltou algo, é só me mandar aqui: texto, foto do comprovante ou o extrato em CSV.`
+      html: `🎩 <b>Bom dia, senhor.</b>\n\n${status}\n\nSe algo ficou de fora, basta me enviar aqui: texto, foto do comprovante ou o extrato em CSV.`
     }
   }
 

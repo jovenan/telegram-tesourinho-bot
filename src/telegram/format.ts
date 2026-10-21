@@ -1,4 +1,4 @@
-export const MESSAGE_LIMIT = 4096
+const MESSAGE_LIMIT = 4096
 
 export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

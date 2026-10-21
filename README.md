@@ -1,6 +1,6 @@
 # Assistente de finanças no Telegram
 
-Bot pessoal de Telegram com um agente Claude que conversa livremente e cuida da planilha de gastos no Google Sheets: lança gastos (texto, foto de comprovante, PDF, extrato CSV), responde perguntas sobre os números, corrige e desfaz lançamentos e manda resumos semanais e mensais.
+Bot pessoal de Telegram com um agente Claude, o **Grana** (um mordomo financeiro), que conversa livremente e cuida da planilha de gastos no Google Sheets: lança gastos (texto, foto de comprovante, PDF, extrato CSV), responde perguntas sobre os números, corrige e desfaz lançamentos e manda resumos semanais e mensais.
 
 Toda alteração na planilha passa por uma prévia com botões ✅/❌ antes de ser gravada.
 
@@ -75,6 +75,8 @@ bun run dev:telegram          # Telegram falso em :8798
 bun run dev:worker            # Worker local, só enxerga abas "TESTE "
 bun run dev:chat "oi"         # conversa com o bot pelo terminal
 bun test && bun run typecheck
+
+bun run deploy:staging        # bot de teste no Cloudflare
 ```
 
 Veja [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md).

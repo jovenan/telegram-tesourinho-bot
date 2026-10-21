@@ -3,7 +3,7 @@ import type { Api } from 'grammy'
 // Attachments are sent inline (base64) and stored in the conversation history, whose
 // rows live in Durable Object SQLite (max 2 MB per value). Base64 grows files by a
 // third, so anything above this is refused.
-export const MAX_INLINE_FILE_BYTES = 1_300_000
+const MAX_INLINE_FILE_BYTES = 1_300_000
 
 export class FileTooLargeError extends Error {}
 

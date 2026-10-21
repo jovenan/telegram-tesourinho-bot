@@ -1,4 +1,4 @@
-export const TIME_ZONE = 'America/Sao_Paulo'
+const TIME_ZONE = 'America/Sao_Paulo'
 
 interface DateParts {
   year: string

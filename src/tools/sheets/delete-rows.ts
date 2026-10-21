@@ -15,7 +15,7 @@ interface Plan {
 export const deleteRows = defineWriteTool({
   name: 'delete_rows',
   description:
-    'Remove linhas inteiras de uma aba que NÃO é mensal (as linhas abaixo sobem). Para lançamentos de gastos use delete_expenses. O usuário aprova antes.',
+    'Remove linhas inteiras de uma aba que NÃO é de gastos (as linhas abaixo sobem). Para lançamentos de gastos use delete_expenses. O usuário aprova antes.',
   kind: 'write',
   input: z.strictObject({
     sheet: z.string().describe('Nome exato da aba'),
