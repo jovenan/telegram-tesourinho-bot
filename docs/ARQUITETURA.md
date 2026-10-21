@@ -47,7 +47,7 @@ O bot deixa de ser um extrator com fluxo fixo e passa a ser um agente com quem s
 | Domingo 19h | Resumo semanal por categoria, comparado à semana anterior |
 | Dia 1º, 9h | Fechamento do mês anterior + lembrete de criar a aba nova, se não existir |
 
-Cron em UTC (São Paulo = UTC−3): `0 13 * * 6`, `0 22 * * 0`, `0 12 1 * *`.
+Cron em UTC (São Paulo = UTC−3): `0 13 * * sat`, `0 22 * * sun`, `0 12 1 * *`. No Cloudflare, 1 = domingo e 7 = sábado; por isso os nomes dos dias.
 
 O resumo semanal depende da data na coluna C. Lançamentos manuais sem data ficam de fora; o resumo informa quantos foram ignorados.
 

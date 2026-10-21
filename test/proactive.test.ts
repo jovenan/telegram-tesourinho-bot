@@ -26,6 +26,10 @@ test('today is São Paulo time', () => {
   expect(today(new Date('2026-11-01T01:30:00Z'))).toEqual({ year: 2026, month: 10, day: 31 })
 })
 
-test('cron schedule matches São Paulo times', () => {
+test('crons match wrangler.toml and use day names', async () => {
   expect(Object.values(CRON_JOBS).sort()).toEqual(['month_close', 'weekly_reminder', 'weekly_summary'])
+  const toml = await Bun.file(new URL('../wrangler.toml', import.meta.url)).text()
+  const configured = JSON.parse(toml.match(/^crons = (\[.*\])$/m)![1])
+  expect(configured.sort()).toEqual(Object.keys(CRON_JOBS).sort())
+  expect(configured.every((cron: string) => !/ [0-7]$/.test(cron))).toBe(true)
 })

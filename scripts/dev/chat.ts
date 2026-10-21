@@ -5,7 +5,7 @@
 //   bun scripts/dev/chat.ts --photo recibo.jpg "legenda opcional"   (file in scripts/dev/fixtures)
 //   bun scripts/dev/chat.ts --doc extrato.csv
 //   bun scripts/dev/chat.ts --click approve:3      (callback_data of a button)
-//   bun scripts/dev/chat.ts --cron "0 13 * * 6"    (runs the scheduled handler)
+//   bun scripts/dev/chat.ts --cron "0 13 * * sat"  (runs the scheduled handler)
 //   bun scripts/dev/chat.ts --state                (dumps the chat's Durable Object tables)
 //   bun scripts/dev/chat.ts --new-chat             (next messages go to a fresh chat/DO)
 import { existsSync, readFileSync, writeFileSync } from 'fs'

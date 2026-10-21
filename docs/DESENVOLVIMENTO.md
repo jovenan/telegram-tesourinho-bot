@@ -32,7 +32,7 @@ bun run dev:chat --photo cupom.jpg "legenda"    # arquivo em scripts/dev/fixture
 bun run dev:chat --doc extrato-nubank.csv
 bun run dev:chat --doc cupom.pdf
 bun run dev:chat --click approve:<token>        # callback_data de um botão exibido
-bun run dev:chat --cron "0 13 * * 6"            # dispara o handler agendado
+bun run dev:chat --cron "0 13 * * sat"          # dispara o handler agendado
 bun run dev:chat --state                        # tabelas do Durable Object do chat
 bun run dev:chat --new-chat                     # próximas mensagens vão para um chat novo
 ```
