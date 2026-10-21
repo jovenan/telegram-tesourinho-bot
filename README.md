@@ -1,200 +1,82 @@
-# Telegram Expenses Bot
+# Assistente de finanças no Telegram
 
-A Telegram bot to track expenses and save them to Google Sheets, powered by AI for automatic expense extraction from images and text.
+Bot pessoal de Telegram com um agente Claude, o **Grana** (um mordomo financeiro), que conversa livremente e cuida da planilha de gastos no Google Sheets: lança gastos (texto, foto de comprovante, PDF, extrato CSV), responde perguntas sobre os números, corrige e desfaz lançamentos e manda resumos semanais e mensais.
 
-## Features
+Toda alteração na planilha passa por uma prévia com botões ✅/❌ antes de ser gravada.
 
-- Register expenses manually via conversation flow
-- AI-powered expense extraction from photos (receipts, bank statements)
-- AI-powered expense extraction from text (`/ai` command)
-- Support for multiple expenses in a single image
-- Inline keyboard buttons for easy confirmation
-- Edit individual fields (description, value, source, category)
-- Categories and sources fetched dynamically from the spreadsheet
-- Saves data directly to Google Sheets
-- Deployed on Cloudflare Workers (free tier)
+- Arquitetura e decisões: [docs/ARQUITETURA.md](docs/ARQUITETURA.md)
+- Ambiente de desenvolvimento e testes: [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md)
 
-## Setup
+## Como funciona
 
-### 1. Install dependencies
+```
+Telegram ─► Worker (Cloudflare, plano free) ─► Durable Object por chat (SQLite)
+                                                  ├─ agente: Claude Sonnet 5.5 + ferramentas
+                                                  ├─ Google Sheets (service account)
+                                                  └─ histórico, memória, custos, log de escritas
+```
+
+- Um passo do agente por invocação (limite de 50 subrequests do plano free).
+- Histórico append-only com compaction automática em conversas longas.
+- Só responde ao `ALLOWED_USER_ID`, em chat privado.
+
+## O que dá para fazer
+
+| Exemplo | O que acontece |
+|---|---|
+| "gastei 45 no iFood no C6" | prévia do lançamento → ✅ → gravado com data, categoria e fonte |
+| foto do cupom / PDF da fatura | extrai os gastos e propõe o lançamento em lote |
+| CSV do extrato | lê o arquivo, ignora estornos/pagamentos, categoriza e propõe o lote |
+| "comprei um fone de 400 em 4x" | uma parcela por mês nas abas existentes, avisa as que faltam |
+| "muda o Cinemark para Presentes", "apaga o Uber", "desfaz" | edição, remoção e desfazer, sempre com prévia |
+| "quanto gastei com mercado?", "compara com setembro" | lê o painel e os lançamentos do mês |
+| "lembra que Uber é sempre Transporte no C6" | preferência guardada para as próximas conversas |
+
+Proativos (horário de São Paulo): lembrete no sábado às 10h, resumo semanal no domingo às 19h e fechamento do mês no dia 1º às 9h.
+
+Comandos: `/novo`, `/memoria`, `/custo`, `/cancelar`, `/ajuda`.
+
+## Planilha esperada
+
+Uma aba por mês chamada `Gastos MM/AAAA`, com o painel em A–B (Renda, Gastos, Saldos) e a tabela de gastos em C–G (`Data | Gasto | Fonte de saida | Categoria | Valor`), com dropdowns de fonte e categoria. Detalhes em [docs/ARQUITETURA.md](docs/ARQUITETURA.md#planilha).
+
+## Configuração
+
+1. **Telegram:** crie o bot com o [@BotFather](https://t.me/BotFather) e descubra seu user id (por exemplo com o [@userinfobot](https://t.me/userinfobot)).
+2. **Google:** crie uma service account com a Google Sheets API habilitada e compartilhe a planilha com o e-mail dela (Editor).
+3. **Anthropic:** crie uma API key em [platform.claude.com](https://platform.claude.com). O custo típico é de alguns dólares por mês; o bot avisa ao chegar em 80% do teto mensal.
+4. **Cloudflare:** plano free é suficiente (Durable Objects com SQLite).
 
 ```bash
 bun install
+bun run deploy
+
+# secrets (uma vez)
+bun run secret TELEGRAM_BOT_TOKEN
+bun run secret TELEGRAM_WEBHOOK_SECRET   # qualquer string aleatória
+bun run secret ALLOWED_USER_ID
+bun run secret ANTHROPIC_API_KEY
+bun run secret GOOGLE_CLIENT_EMAIL
+bun run secret GOOGLE_PRIVATE_KEY
+bun run secret GOOGLE_SPREADSHEET_ID
+
+# aponta o bot para o Worker e registra o menu de comandos
+TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... \
+WEBHOOK_URL=https://telegram-api-bot.<subdominio>.workers.dev/webhook \
+bun run setup:telegram
 ```
 
-### 2. Create a Telegram Bot
+Variáveis em `wrangler.toml` (`[vars]`): `CLAUDE_MODEL` (padrão `claude-sonnet-5-5`), `CLAUDE_EFFORT` (`medium`) e `MONTHLY_BUDGET_USD` (`15`). O teto também pode ser ajustado pelo próprio bot, no alerta de 80%.
 
-1. Talk to [@BotFather](https://t.me/BotFather) on Telegram
-2. Create a new bot with `/newbot`
-3. Copy the token
-
-### 3. Configure Google Sheets
-
-1. Create a Google Cloud project
-2. Enable the Google Sheets API
-3. Create a Service Account and download the JSON credentials
-4. Share your spreadsheet with the service account email
-
-### 4. Get Anthropic API Key
-
-1. Go to [console.anthropic.com](https://console.anthropic.com)
-2. Create an API key
-
-### 5. Environment variables
-
-Create a `.dev.vars` file for local development:
+## Desenvolvimento
 
 ```bash
-TELEGRAM_BOT_TOKEN=your_bot_token
-ANTHROPIC_API_KEY=your_anthropic_key
-TELEGRAM_WEBHOOK_SECRET=random_secret_string
-GOOGLE_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
-GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-GOOGLE_SPREADSHEET_ID=your_spreadsheet_id
-GOOGLE_SHEET_NAME=Sheet Name
+bun run dev:telegram          # Telegram falso em :8798
+bun run dev:worker            # Worker local, só enxerga abas "TESTE "
+bun run dev:chat "oi"         # conversa com o bot pelo terminal
+bun test && bun run typecheck
+
+bun run deploy:staging        # bot de teste no Cloudflare
 ```
 
-| Variable | Description |
-|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
-| `ANTHROPIC_API_KEY` | API key from Anthropic |
-| `TELEGRAM_WEBHOOK_SECRET` | Secret for webhook validation |
-| `GOOGLE_SPREADSHEET_ID` | ID from the spreadsheet URL |
-| `GOOGLE_SHEET_NAME` | Sheet tab name (e.g., "Gastos 03/2026") |
-| `GOOGLE_CLIENT_EMAIL` | Service account email |
-| `GOOGLE_PRIVATE_KEY` | Private key from JSON credentials |
-
-## Running Locally
-
-```bash
-npx wrangler dev
-```
-
-This reads `.dev.vars` automatically and simulates the Cloudflare Workers environment.
-
-To test with Telegram, use ngrok to expose your local server:
-
-```bash
-ngrok http 8787
-```
-
-Then set the webhook:
-
-```bash
-curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://your-ngrok-url.ngrok-free.app/webhook", "secret_token": "<TELEGRAM_WEBHOOK_SECRET>"}'
-```
-
-## Deploy to Cloudflare Workers
-
-### 1. Deploy
-
-```bash
-npx wrangler deploy
-```
-
-### 2. Add secrets
-
-Via terminal:
-
-```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-npx wrangler secret put GOOGLE_CLIENT_EMAIL
-npx wrangler secret put GOOGLE_PRIVATE_KEY
-npx wrangler secret put GOOGLE_SPREADSHEET_ID
-npx wrangler secret put GOOGLE_SHEET_NAME
-```
-
-Or via Cloudflare Dashboard:
-1. Go to https://dash.cloudflare.com
-2. Workers & Pages → your worker
-3. Settings → Variables and Secrets
-
-### 3. Set webhook
-
-```bash
-curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://your-worker.your-subdomain.workers.dev/webhook", "secret_token": "<TELEGRAM_WEBHOOK_SECRET>"}'
-```
-
-To check webhook status:
-
-```bash
-curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
-```
-
-To remove webhook:
-
-```bash
-curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/deleteWebhook"
-```
-
-## Spreadsheet Structure
-
-The bot expects these columns:
-
-| Column | Content |
-|--------|---------|
-| D | Description |
-| E | Source |
-| F | Category |
-| G | Value |
-
-Sources and categories are read from existing values in columns E and F.
-
-## Commands
-
-- `/start` - Welcome message
-- `/gasto` - Start manual expense registration
-- `/ai [text]` - Extract expense from text using AI
-- `/cancelar` - Cancel current operation
-- Send a photo - Extract expenses from image using AI
-
-## AI Features
-
-### Photo Analysis
-
-Send a photo of a receipt, bank statement, or any document with expenses. The bot will:
-1. Extract all expenses from the image
-2. Show each expense one by one
-3. Let you confirm, skip, or edit each one
-
-### Text Analysis
-
-Use `/ai` followed by expense description:
-
-```
-/ai Almoço no restaurante 45,90 no débito
-```
-
-### Adding Custom Description
-
-When confirming an expense, you can add a custom suffix:
-
-```
-add Ração do cachorro
-```
-
-This will save as: `AGROPETHORSE SOROCABA - Ração do cachorro - AI GENERATED`
-
-## Project Structure
-
-```
-src/
-├── index.ts      # HTTP routes (Hono)
-├── bot.ts        # Conversation logic & Telegram API
-├── anthropic.ts  # AI expense extraction
-├── sheets.ts     # Google Sheets API (fetch-based)
-├── telegram.ts   # Telegram file utilities
-├── config.ts     # Messages
-└── types.ts      # TypeScript interfaces
-```
-
-## Security
-
-- Webhook endpoint protected by `TELEGRAM_WEBHOOK_SECRET`
-- All AI-generated expenses are marked with `- AI GENERATED` suffix
+Veja [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md).

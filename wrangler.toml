@@ -1,3 +1,68 @@
 name = "telegram-api-bot"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2026-10-01"
+
+[vars]
+CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_EFFORT = "medium"
+MONTHLY_BUDGET_USD = "15"
+
+[[durable_objects.bindings]]
+name = "CHAT"
+class_name = "ChatDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatDO"]
+
+# Proactive messages (UTC; São Paulo is UTC−3): Saturday 10h reminder, Sunday 19h
+# weekly summary, day 1 at 9h month close. See src/proactive. Use day names: in
+# Cloudflare cron 1 is Sunday and 7 is Saturday (0 is rejected).
+[triggers]
+crons = ["0 13 * * sat", "0 22 * * sun", "0 12 1 * *"]
+
+# Drizzle migrations (src/db/migrations/*.sql) are bundled as text modules.
+[[rules]]
+type = "Text"
+globs = ["**/*.sql"]
+fallthrough = true
+
+# Local development environment: `bun run dev:worker`. Talks to scripts/dev/fake-telegram.ts
+# instead of Telegram and can only write to the "TESTE " tabs of the spreadsheet.
+[env.dev]
+name = "telegram-api-bot-dev"
+
+[env.dev.vars]
+CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_EFFORT = "medium"
+ALLOWED_USER_ID = "1"
+TELEGRAM_API_ROOT = "http://localhost:8798"
+SHEETS_SANDBOX_PREFIX = "TESTE "
+MONTHLY_BUDGET_USD = "2"
+
+[[env.dev.durable_objects.bindings]]
+name = "CHAT"
+class_name = "ChatDO"
+
+# Staging: a separate test bot running on Cloudflare (`bun run deploy:staging`).
+# Real Telegram, Workers and spreadsheet (all tabs, like production); writes still
+# need approval. Add SHEETS_SANDBOX_PREFIX = "TESTE " to limit it to the test tabs.
+# No crons: the free plan allows 5 per account and production uses 3.
+[env.staging]
+name = "telegram-api-bot-staging"
+
+[env.staging.vars]
+CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_EFFORT = "medium"
+MONTHLY_BUDGET_USD = "3"
+
+[env.staging.triggers]
+crons = []
+
+# Workers Logs: keeps logs queryable in the dashboard (free plan: 200k events/day).
+[env.staging.observability]
+enabled = true
+
+[[env.staging.durable_objects.bindings]]
+name = "CHAT"
+class_name = "ChatDO"
