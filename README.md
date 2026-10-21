@@ -75,8 +75,6 @@ bun run dev:telegram          # Telegram falso em :8798
 bun run dev:worker            # Worker local, só enxerga abas "TESTE "
 bun run dev:chat "oi"         # conversa com o bot pelo terminal
 bun test && bun run typecheck
-
-bun run deploy:staging        # bot de teste no Cloudflare
 ```
 
 Veja [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md).

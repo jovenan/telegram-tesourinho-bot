@@ -36,18 +36,6 @@ app.post('/webhook', async (c) => {
   return c.json({ ok: true })
 })
 
-// Staging-only inspection of the owner's conversation, to debug the agent's behavior.
-// Exists only when the DEBUG_TOKEN secret is set (never in production).
-app.get('/debug/messages', async (c) => {
-  const env = c.env
-  if (!env.DEBUG_TOKEN || c.req.header('Authorization') !== `Bearer ${env.DEBUG_TOKEN}`) {
-    return c.json({ error: 'Not found' }, 404)
-  }
-  const limit = Math.min(Number(c.req.query('limit') ?? 60), 300)
-  const chat = env.CHAT.get(env.CHAT.idFromName(env.ALLOWED_USER_ID))
-  return c.json(await chat.debugMessages(limit))
-})
-
 export default {
   fetch: app.fetch,
 

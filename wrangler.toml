@@ -43,26 +43,3 @@ MONTHLY_BUDGET_USD = "2"
 [[env.dev.durable_objects.bindings]]
 name = "CHAT"
 class_name = "ChatDO"
-
-# Staging: a separate test bot running on Cloudflare (`bun run deploy:staging`).
-# Real Telegram, Workers and spreadsheet (all tabs, like production); writes still
-# need approval. Add SHEETS_SANDBOX_PREFIX = "TESTE " to limit it to the test tabs.
-# No crons: the free plan allows 5 per account and production uses 3.
-[env.staging]
-name = "telegram-api-bot-staging"
-
-[env.staging.vars]
-CLAUDE_MODEL = "claude-sonnet-5-5"
-CLAUDE_EFFORT = "medium"
-MONTHLY_BUDGET_USD = "3"
-
-[env.staging.triggers]
-crons = []
-
-# Workers Logs: keeps logs queryable in the dashboard (free plan: 200k events/day).
-[env.staging.observability]
-enabled = true
-
-[[env.staging.durable_objects.bindings]]
-name = "CHAT"
-class_name = "ChatDO"

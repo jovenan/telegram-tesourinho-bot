@@ -242,10 +242,7 @@ Princípios:
 | Ambiente | Onde | Telegram | Planilha |
 |---|---|---|---|
 | `dev` | `wrangler dev` local | falso (`scripts/dev/fake-telegram.ts`) | só abas `TESTE ` (`SHEETS_SANDBOX_PREFIX`) |
-| `staging` | Worker `telegram-api-bot-staging` | bot de teste | planilha real, todas as abas; Workers Logs ligado; sem crons |
 | produção | Worker `telegram-api-bot` | bot real | planilha real; crons ligados |
-
-No staging, `GET /debug/messages` devolve as últimas mensagens da conversa (só texto e nomes de ferramentas) para depurar o comportamento do agente. A rota só existe quando o secret `DEBUG_TOKEN` está configurado e exige `Authorization: Bearer <token>`; em produção esse secret não existe.
 
 ## Pendências conhecidas
 

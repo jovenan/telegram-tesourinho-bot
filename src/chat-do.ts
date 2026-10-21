@@ -113,39 +113,6 @@ export class ChatDO extends DurableObject<Env> {
     await this.wake()
   }
 
-  // Text-only view of the latest messages for /debug/messages (staging). Images,
-  // PDFs and thinking are left out.
-  async debugMessages(limit: number) {
-    const summarize = (block: any): string | null => {
-      switch (block.type) {
-        case 'text':
-          return block.text
-        case 'tool_use':
-          return `→ ${block.name} ${JSON.stringify(block.input)}`
-        case 'tool_result':
-          return `← ${block.is_error ? 'ERRO ' : ''}${typeof block.content === 'string' ? block.content : JSON.stringify(block.content)}`.slice(0, 600)
-        case 'image':
-        case 'document':
-          return `[${block.type}]`
-        case 'compaction':
-          return `[resumo] ${String(block.content ?? '').slice(0, 300)}`
-        default:
-          return null
-      }
-    }
-
-    return {
-      usage: this.usage.get(monthKey(new Date())),
-      messages: this.conversations.recent(limit).map((m) => ({
-        id: m.id,
-        conversation: m.conversationId,
-        at: new Date(m.createdAt).toISOString(),
-        role: m.role,
-        content: (typeof m.content === 'string' ? [m.content] : m.content.map(summarize)).filter((part) => part !== null)
-      }))
-    }
-  }
-
   async schedule(kind: JobKind): Promise<void> {
     this.jobs.add(kind)
     await this.wake()
