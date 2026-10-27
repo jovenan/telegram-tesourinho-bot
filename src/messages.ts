@@ -11,6 +11,8 @@ export const CHAT_MESSAGES = {
     `/novo - Começar uma conversa nova (esquece o contexto, mantém as preferências)\n` +
     `/memoria - Preferências que guardei\n` +
     `/custo - Gasto com a IA neste mês\n` +
+    `/sync - Buscar agora as compras do cartão\n` +
+    `/banco - Situação da importação do cartão\n` +
     `/cancelar - Interromper o que estiver em andamento\n` +
     `/ajuda - Esta mensagem\n\n` +
     `Fora isso, é só escrever, mandar foto (comprovante, extrato) ou arquivo CSV/PDF.\n` +

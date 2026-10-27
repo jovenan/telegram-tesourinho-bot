@@ -12,6 +12,7 @@ import { MemoryStore } from './db/stores/memories'
 import { RunStateStore, type RunState } from './db/stores/run-state'
 import { SettingsStore } from './db/stores/settings'
 import { UsageStore } from './db/stores/usage'
+import { BankTransactionStore } from './db/stores/bank-transactions'
 import { UploadStore } from './db/stores/uploads'
 import { WriteStore } from './db/stores/writes'
 import { createClaude, deleteFile, uploadFile } from './agent/claude'
@@ -33,6 +34,7 @@ import { buildSystemPrompt, PROMPT_VERSION } from './agent/prompt'
 import type { ContentBlockParam, MessageParam, PendingApproval, ToolResultBlockParam, Usage } from './agent/types'
 import { runCommand } from './commands'
 import { CHAT_MESSAGES } from './messages'
+import { BankImport } from './bank-import'
 import { runMaintenance } from './maintenance'
 import { proactiveAction, type ProactiveKind } from './proactive'
 import { SheetsClient } from './sheets/client'
@@ -40,7 +42,7 @@ import { monthTabPattern, Spreadsheet } from './sheets/expenses'
 import { createTelegramApi } from './telegram/api'
 import { downloadFile, FileTooLargeError, imageMediaType, MAX_IMAGE_BYTES, sniffImageType } from './telegram/files'
 import { escapeHtml, markdownToTelegramHtml, splitMessage } from './telegram/format'
-import { approvalKeyboard, BUDGET_ACTIONS, budgetKeyboard, parseApproval } from './telegram/keyboards'
+import { approvalKeyboard, BUDGET_ACTIONS, budgetKeyboard, parseApproval, parseBankCallback } from './telegram/keyboards'
 import { TOOLS } from './tools'
 import { applyWrite, toolResult, toolsHash, type ToolContext } from './tools/registry'
 import { decodeText, parseCsv } from './utils/csv'
@@ -72,6 +74,7 @@ export class ChatDO extends DurableObject<Env> {
   private readonly writes: WriteStore
   private readonly jobs: JobStore
   private readonly uploads: UploadStore
+  private readonly bank: BankImport
   private readonly api: Api
   private readonly claude: Anthropic
   private readonly spreadsheet: Spreadsheet
@@ -104,6 +107,19 @@ export class ChatDO extends DurableObject<Env> {
       }),
       { sandboxPrefix: env.SHEETS_SANDBOX_PREFIX }
     )
+    this.bank = new BankImport({
+      env,
+      api: this.api,
+      claude: this.claude,
+      spreadsheet: this.spreadsheet,
+      transactions: new BankTransactionStore(db),
+      settings: this.settings,
+      jobs: this.jobs,
+      writes: this.writes,
+      memories: this.memories,
+      chatId: () => this.chatId(),
+      recordUsage: (model, usage) => this.recordUsage(this.chatId() ?? Number(env.ALLOWED_USER_ID), model, usage)
+    })
   }
 
   // ── Entry points ─────────────────────────────────────────────────────────────
@@ -240,6 +256,8 @@ export class ChatDO extends DurableObject<Env> {
         },
         cancel: () => this.cancelPending(),
         usageReport: () => this.usageReport(),
+        syncBank: () => this.bank.requestSync(),
+        bankReport: () => this.bank.statusReport(),
         memoriesReport: () => CHAT_MESSAGES.memories(this.memories.list().map((m) => `#${m.id} ${escapeHtml(m.text)}`))
       })
       if (handled) return
@@ -355,6 +373,12 @@ export class ChatDO extends DurableObject<Env> {
       return
     }
 
+    const bank = parseBankCallback(query.data)
+    if (bank) {
+      await this.bank.handleCallback(query, bank)
+      return
+    }
+
     const approval = parseApproval(query.data)
     if (approval) {
       const state = this.runState.get()
@@ -460,7 +484,7 @@ export class ChatDO extends DurableObject<Env> {
   // ── Agent ────────────────────────────────────────────────────────────────────
 
   private toolContext(): ToolContext {
-    return { spreadsheet: this.spreadsheet, memories: this.memories, files: this.files, writes: this.writes, now: new Date() }
+    return { spreadsheet: this.spreadsheet, cards: this.bank.cards, memories: this.memories, files: this.files, writes: this.writes, now: new Date() }
   }
 
   private stepInput(conversation: Conversation): Omit<StepInput, 'toolContext'> {
@@ -654,8 +678,14 @@ export class ChatDO extends DurableObject<Env> {
       await this.maintenance()
       return
     }
-    // The card import is not wired yet.
-    if (job.kind === 'bank_fetch' || job.kind === 'bank_process') return
+    if (job.kind === 'bank_fetch' || job.kind === 'bank_process') {
+      try {
+        await (job.kind === 'bank_fetch' ? this.bank.fetch() : this.bank.process())
+      } catch (error) {
+        console.error('Card import failed', job.kind, error)
+      }
+      return
+    }
 
     // In a private chat the chat id is the user id, so jobs work before any message.
     const chatId = this.chatId() ?? Number(this.env.ALLOWED_USER_ID)

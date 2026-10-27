@@ -13,7 +13,8 @@ export interface MatchCandidate {
 
 export type MatchResult =
   | { kind: 'none' }
-  // Certainly the same purchase: one row, same source, value and close date.
+  // Certainly the same purchase: same source and value, and every such row is close
+  // in date (so it doesn't matter which one it takes).
   | { kind: 'in_sheet'; row: Expense }
   // Probably the same: the user decides.
   | { kind: 'maybe'; row: Expense }
@@ -43,7 +44,7 @@ export function matchExpense(candidate: MatchCandidate, rows: Expense[], claimed
   const near = same.filter((row) => distance(row) <= NEAR_DAYS)
   const closest = [...same].sort((a, b) => distance(a) - distance(b))[0]
 
-  if (same.length === 1 && claimed === 0 && near.length === 1) return { kind: 'in_sheet', row: near[0] }
+  if (near.length === same.length) return { kind: 'in_sheet', row: near[0] }
   return { kind: 'maybe', row: near[0] ?? closest }
 }
 

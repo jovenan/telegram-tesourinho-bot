@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ApiTool, PendingWrite, ToolResultBlockParam, ToolUseBlock } from '../agent/types'
+import type { CardConfig } from '../bank/config'
 import type { FileStore } from '../db/stores/files'
 import type { MemoryStore } from '../db/stores/memories'
 import type { WriteStore } from '../db/stores/writes'
@@ -10,6 +11,8 @@ import type { UndoOp } from '../sheets/undo'
 
 export interface ToolContext {
   spreadsheet: Spreadsheet
+  // Credit cards whose expenses go to the month their bill is due.
+  cards: CardConfig[]
   memories: MemoryStore
   files: FileStore
   writes: WriteStore

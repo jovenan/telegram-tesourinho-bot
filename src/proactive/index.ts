@@ -35,20 +35,26 @@ export function weekOf(day: CalendarDay): Week {
 }
 
 async function expensesIn(spreadsheet: Spreadsheet, weeks: Week[]): Promise<{ dated: DatedExpense[]; undated: number }> {
-  const months = new Set<string>()
+  // Card purchases sit in the tab of the month their bill is due (usually the next
+  // one), so that tab is read too; the date column decides the week. Undated rows
+  // are only counted in the week's own months.
+  const own = new Set<string>()
+  const next = new Set<string>()
   for (const week of weeks) {
-    months.add(monthLabelOf(week.start))
-    months.add(monthLabelOf(week.end))
+    for (const day of [week.start, week.end]) {
+      own.add(monthLabelOf(day))
+      next.add(monthLabelOf(addDays({ ...day, day: 1 }, 31)))
+    }
   }
 
   const dated: DatedExpense[] = []
   let undated = 0
-  for (const month of months) {
+  for (const month of new Set([...own, ...next])) {
     if (!(await spreadsheet.hasTab(spreadsheet.monthTabTitle(month)))) continue
     for (const expense of await spreadsheet.expenses(month)) {
       const day = parseSheetDate(expense.date)
       if (day) dated.push({ ...expense, day })
-      else undated++
+      else if (own.has(month)) undated++
     }
   }
   return { dated, undated }

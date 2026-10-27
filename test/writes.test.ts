@@ -68,3 +68,20 @@ test('approval callback data round-trips', () => {
   ])
   expect(parseApproval('budget:raise')).toBeNull()
 })
+
+test('card import callback data round-trips and fits in 64 bytes', async () => {
+  const { bankPreviewKeyboard, bankReviewKeyboard, parseBankCallback } = await import('../src/telegram/keyboards')
+  const categories = Array.from({ length: 20 }, (_, i) => `Categoria ${i}`)
+  const keyboards = [
+    bankPreviewKeyboard('abcdefghij', 3, 5),
+    bankReviewKeyboard('abcdefghij', { order: 12, suggestion: 'Lazer', duplicate: null }, categories, 2),
+    bankReviewKeyboard('abcdefghij', { order: 3, suggestion: null, duplicate: { row: 4 } }, categories, 0)
+  ]
+  const data = keyboards.flatMap((k) => k.inline_keyboard.flat().map((button) => (button as { callback_data: string }).callback_data))
+  expect(data.every((d) => new TextEncoder().encode(d).length <= 64)).toBe(true)
+  expect(data.every((d) => parseBankCallback(d) !== null)).toBe(true)
+  expect(parseBankCallback('bank:cat:abcdefghij:12:17')).toEqual({ action: 'cat', token: 'abcdefghij', args: [12, 17] })
+  expect(parseBankCallback('bank:sync:')).toEqual({ action: 'sync', token: '', args: [] })
+  expect(parseBankCallback('bank:nope:x')).toBeNull()
+  expect(parseBankCallback('approve:abc')).toBeNull()
+})

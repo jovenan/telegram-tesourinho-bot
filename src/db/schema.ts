@@ -60,7 +60,9 @@ export const usage = sqliteTable('usage', {
 })
 
 export const settings = sqliteTable('settings', {
-  key: text('key', { enum: ['budget_usd', 'model', 'chat_id', 'user_name'] }).primaryKey(),
+  key: text('key', {
+    enum: ['budget_usd', 'model', 'chat_id', 'user_name', 'bank_last_sync', 'bank_batch', 'bank_accounts', 'bank_notices']
+  }).primaryKey(),
   value: text('value').notNull()
 })
 
@@ -104,3 +106,39 @@ export const uploads = sqliteTable('uploads', {
   createdAt: integer('created_at').notNull(),
   deletedAt: integer('deleted_at')
 })
+
+// Credit card transactions seen by the import, by the bank's id: nothing is proposed
+// twice. Matched and imported ones also teach merchant categories and count as
+// claims on sheet rows. Kept for good (an old purchase must never come back).
+export const bankTransactions = sqliteTable(
+  'bank_transactions',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    // Purchase date, yyyy-mm-dd.
+    date: text('date').notNull(),
+    description: text('description').notNull(),
+    amount: real('amount').notNull(),
+    billDueDate: text('bill_due_date'),
+    installmentNumber: integer('installment_number'),
+    totalInstallments: integer('total_installments'),
+    mcc: text('mcc'),
+    providerCategory: text('provider_category'),
+    state: text('state', { enum: ['new', 'review', 'in_sheet', 'imported', 'ignored', 'waiting_tab'] }).notNull(),
+    // Set once processed: target tab, sheet source and merchant key.
+    tab: text('tab'),
+    source: text('source'),
+    merchantKey: text('merchant_key'),
+    // Category written (imported) or of the matched row (in_sheet).
+    category: text('category'),
+    suggestion: text('suggestion'),
+    suggestionKind: text('suggestion_kind', { enum: ['rule', 'llm'] }),
+    duplicate: text('duplicate', { mode: 'json' }).$type<{ row: number; description: string; date: string; value: number | null }>(),
+    closingDay: integer('closing_day', { mode: 'boolean' }).notNull().default(false),
+    // Position in the open batch (the review buttons refer to it).
+    batchOrder: integer('batch_order'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+  },
+  (table) => [index('bank_transactions_by_state').on(table.state)]
+)

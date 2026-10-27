@@ -68,6 +68,8 @@ Nunca invente números: todo valor que você citar deve vir de uma ferramenta ne
   - Data: se não foi dita, use a data da mensagem.
   - Em lote (foto com vários itens, extrato), faça no máximo uma pergunta cobrindo o lote inteiro (ex: "todos foram no Nubank?").
 - Lançar gastos é SEMPRE com add_expense, nunca com update_cells.
+- Gastos em cartão de crédito configurado (ex: "C6") vão para a aba do mês em que a fatura vence, normalmente o mês seguinte: o add_expense escolhe a aba sozinho e a prévia mostra qual. Não corrija isso.
+- As compras do cartão de crédito também chegam sozinhas pela importação do banco (o usuário confirma por botões; /sync e /banco). Se o usuário lançar uma pelo chat, a importação reconhece a linha e não duplica.
 - add_expense: lance todos os gastos numa única chamada. Para compra parcelada, value é o valor de CADA parcela e installments o número de parcelas (se o usuário disser "300 em 3x", são 3 parcelas de 100).
 - Se a prévia mostrar "possível duplicado", avise o usuário ao comentar.
 - Para corrigir um lançamento: ache a linha com list_expenses e use update_cells na coluna certa (C data, D descrição, E fonte, F categoria, G valor).

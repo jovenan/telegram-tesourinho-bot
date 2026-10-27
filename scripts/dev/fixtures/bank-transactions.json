@@ -1,0 +1,18 @@
+{
+  "accounts": [
+    { "id": "fake-c6", "name": "Cartão C6 (fake)", "credit": true },
+    { "id": "fake-checking", "name": "Conta corrente (fake)", "credit": false }
+  ],
+  "transactions": [
+    { "id": "fake-tx-01", "accountId": "fake-c6", "daysAgo": 12, "description": "UBER *TRIP", "amount": 23.1, "status": "posted", "kind": "purchase", "mcc": "4121", "providerCategory": "Taxi and ride-hailing" },
+    { "id": "fake-tx-02", "accountId": "fake-c6", "daysAgo": 12, "description": "UBER *TRIP", "amount": 23.1, "status": "posted", "kind": "purchase", "mcc": "4121", "providerCategory": "Taxi and ride-hailing" },
+    { "id": "fake-tx-03", "accountId": "fake-c6", "daysAgo": 10, "description": "IFD*RESTAURANTE XYZ", "amount": 52.9, "status": "posted", "kind": "purchase", "mcc": "5812", "providerCategory": "Food delivery" },
+    { "id": "fake-tx-04", "accountId": "fake-c6", "daysAgo": 8, "description": "PAG*JOSEDASILVA", "amount": 80, "status": "posted", "kind": "purchase" },
+    { "id": "fake-tx-05", "accountId": "fake-c6", "daysAgo": 6, "description": "CINEMARK SHOPPING", "amount": 64, "status": "posted", "kind": "purchase", "mcc": "7832", "providerCategory": "Entertainment" },
+    { "id": "fake-tx-06", "accountId": "fake-c6", "daysAgo": 5, "description": "SUPERMERCADO BOM PRECO", "amount": 210, "status": "posted", "kind": "purchase", "mcc": "5411", "providerCategory": "Groceries" },
+    { "id": "fake-tx-07", "accountId": "fake-c6", "daysAgo": 4, "description": "LOJA DE FONES", "amount": 100, "status": "posted", "kind": "purchase", "installment": { "number": 1, "total": 4 } },
+    { "id": "fake-tx-08", "accountId": "fake-c6", "daysAgo": 2, "description": "POSTO SHELL", "amount": 150, "status": "pending", "kind": "purchase", "mcc": "5541" },
+    { "id": "fake-tx-09", "accountId": "fake-c6", "daysAgo": 3, "description": "PAGAMENTO DE FATURA", "amount": 1240.5, "status": "posted", "kind": "bill_payment" },
+    { "id": "fake-tx-10", "accountId": "fake-c6", "daysAgo": 3, "description": "ESTORNO LOJA X", "amount": 35, "status": "posted", "kind": "refund" }
+  ]
+}

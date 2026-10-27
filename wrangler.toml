@@ -40,6 +40,8 @@ ALLOWED_USER_ID = "1"
 TELEGRAM_API_ROOT = "http://localhost:8798"
 SHEETS_SANDBOX_PREFIX = "TESTE "
 MONTHLY_BUDGET_USD = "2"
+# Card import from scripts/dev/fixtures/bank-transactions.json instead of Pluggy.
+BANK_SOURCE = "fake"
 
 [[env.dev.durable_objects.bindings]]
 name = "CHAT"

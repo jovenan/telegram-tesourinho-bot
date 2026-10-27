@@ -69,7 +69,9 @@ export interface ProcessResult {
   problems: string[]
 }
 
-function describe(tx: PendingTx): string {
+// Description as written in the sheet: installments carry "(k/n)", like the ones the
+// agent creates.
+export function describe(tx: Pick<PendingTx, 'description' | 'installmentNumber' | 'totalInstallments'>): string {
   const base = tx.description.trim()
   return tx.totalInstallments && tx.totalInstallments > 1 && tx.installmentNumber
     ? `${base} (${tx.installmentNumber}/${tx.totalInstallments})`

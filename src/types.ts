@@ -20,4 +20,13 @@ export interface Env {
   SHEETS_SANDBOX_PREFIX?: string
   // Staging only: enables GET /debug/messages.
   DEBUG_TOKEN?: string
+  // Card import (Meu Pluggy). PLUGGY_ITEM_IDS is comma-separated; PLUGGY_ACCOUNTS is
+  // the per-card JSON described in src/bank/config.ts.
+  PLUGGY_CLIENT_ID?: string
+  PLUGGY_CLIENT_SECRET?: string
+  PLUGGY_ITEM_IDS?: string
+  PLUGGY_ACCOUNTS?: string
+  PLUGGY_API_ROOT?: string
+  // Development: "fake" reads scripts/dev/fixtures/bank-transactions.json instead of Pluggy.
+  BANK_SOURCE?: string
 }

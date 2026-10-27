@@ -22,6 +22,13 @@
       "when": 1793067243445,
       "tag": "0002_maintenance",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793067749594,
+      "tag": "0003_bank_import",
+      "breakpoints": true
     }
   ]
 }

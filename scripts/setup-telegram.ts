@@ -24,6 +24,8 @@ await api.setMyCommands([
   { command: 'novo', description: 'Começar uma conversa nova' },
   { command: 'memoria', description: 'Preferências guardadas' },
   { command: 'custo', description: 'Gasto com a IA neste mês' },
+  { command: 'sync', description: 'Buscar agora as compras do cartão' },
+  { command: 'banco', description: 'Situação da importação do cartão' },
   { command: 'cancelar', description: 'Interromper o que estiver em andamento' },
   { command: 'ajuda', description: 'Comandos e dicas' }
 ])

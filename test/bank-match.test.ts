@@ -21,6 +21,17 @@ test('different source or value is not a match', () => {
   expect(matchExpense(purchase, [row({ value: 23.11 })], 0)).toEqual({ kind: 'none' })
 })
 
+test('two equal rows on the same day cover two equal purchases', () => {
+  const claims = new ClaimCounter()
+  const sig = signature(purchase.tab, 'C6', 23.1)
+  const rows = [row({ row: 10 }), row({ row: 11 })]
+  for (let i = 0; i < 2; i++) {
+    expect(matchExpense(purchase, rows, claims.get(sig)).kind).toBe('in_sheet')
+    claims.add(sig)
+  }
+  expect(matchExpense(purchase, rows, claims.get(sig))).toEqual({ kind: 'none' })
+})
+
 test('two equal purchases on the same day need two rows', () => {
   const claims = new ClaimCounter()
   const sig = signature(purchase.tab, 'C6', 23.1)
