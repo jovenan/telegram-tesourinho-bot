@@ -42,6 +42,20 @@ export class SheetNotFoundError extends Error {
   }
 }
 
+export class TabNotAllowedError extends Error {
+  constructor(title: string) {
+    super(`A aba "${title}" não está acessível: só as abas mensais "Gastos MM/AAAA" visíveis.`)
+    this.name = 'TabNotAllowedError'
+  }
+}
+
+// The only tabs the bot may see, read or modify: "<prefix>Gastos MM/YYYY". Anything
+// else in the spreadsheet (copies, plans, trips, hidden old months) is off-limits.
+export function monthTabPattern(prefix = ''): RegExp {
+  const escaped = prefix.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')
+  return new RegExp(`^${escaped}Gastos (0[1-9]|1[0-2])/\\d{4}$`)
+}
+
 // "R$ 1.234,56", "1234,56", "-12,3", 1234.56 → number. Returns null when not numeric.
 export function parseBrl(value: CellValue | undefined): number | null {
   if (typeof value === 'number') return value
@@ -120,8 +134,8 @@ function listValues(rule: unknown): string[] {
 }
 
 export interface SpreadsheetOptions {
-  // When set (development), only tabs whose title starts with this prefix are visible,
-  // readable or writable, and monthly tabs are "<prefix>Gastos MM/YYYY".
+  // When set (development), monthly tabs are "<prefix>Gastos MM/YYYY", so only the
+  // test copies are visible, readable or writable.
   sandboxPrefix?: string
 }
 
@@ -165,6 +179,7 @@ const normalizeHeader = (value: CellValue | undefined) =>
 
 export class Spreadsheet {
   readonly prefix: string
+  readonly tabPattern: RegExp
   private headerCache = new Map<string, { at: number; isExpenseTab: boolean }>()
 
   constructor(
@@ -172,24 +187,28 @@ export class Spreadsheet {
     options: SpreadsheetOptions = {}
   ) {
     this.prefix = options.sandboxPrefix ?? ''
+    this.tabPattern = monthTabPattern(this.prefix)
   }
 
   monthTabTitle(month: string): string {
     return `${this.prefix}Gastos ${month}`
   }
 
+  // Whether the tab exists and may be used (hidden months count as missing).
   async hasTab(title: string): Promise<boolean> {
-    return (await this.tabs(true)).some((sheet) => sheet.title === title)
+    return (await this.tabs()).some((sheet) => sheet.title === title)
   }
 
-  async tabs(includeHidden = false): Promise<SheetInfo[]> {
+  // Visible monthly tabs, the only ones the bot works with.
+  async tabs(): Promise<SheetInfo[]> {
     const sheets = await this.client.listSheets()
-    return sheets.filter((sheet) => sheet.title.startsWith(this.prefix) && (includeHidden || !sheet.hidden))
+    return sheets.filter((sheet) => this.tabPattern.test(sheet.title) && !sheet.hidden)
   }
 
   async tab(title: string): Promise<SheetInfo> {
-    const found = (await this.tabs(true)).find((sheet) => sheet.title === title)
+    const found = (await this.client.listSheets()).find((sheet) => sheet.title === title)
     if (!found) throw new SheetNotFoundError(title)
+    if (!this.tabPattern.test(found.title) || found.hidden) throw new TabNotAllowedError(title)
     return found
   }
 
@@ -198,8 +217,8 @@ export class Spreadsheet {
     return this.client.getValues(this.client.range(title, cells))
   }
 
-  // A tab is an expense tab by its layout, not its name: copies and renamed months
-  // get the same rules (dropdown validation, panel protection, table growth).
+  // Access comes from the name; the layout is checked before reading or writing the
+  // table, so a month tab with a broken header is refused instead of misread.
   async isExpenseTab(title: string): Promise<boolean> {
     const cached = this.headerCache.get(title)
     if (cached && Date.now() - cached.at < HEADER_CACHE_MS) return cached.isExpenseTab

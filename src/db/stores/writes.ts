@@ -1,4 +1,4 @@
-import { desc, eq, isNull } from 'drizzle-orm'
+import { desc, eq, isNull, lt } from 'drizzle-orm'
 import type { Db } from '..'
 import type { UndoOp } from '../../sheets/undo'
 import { writes } from '../schema'
@@ -28,5 +28,9 @@ export class WriteStore {
 
   markUndone(id: number): void {
     this.db.update(writes).set({ undoneAt: Date.now() }).where(eq(writes.id, id)).run()
+  }
+
+  deleteBefore(before: number): void {
+    this.db.delete(writes).where(lt(writes.createdAt, before)).run()
   }
 }

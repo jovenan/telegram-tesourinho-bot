@@ -2,7 +2,7 @@ import type { Memory } from '../db/stores/memories'
 
 // Bump when the prompt text changes: conversations started with another version are
 // replaced by a new one (the prompt is frozen per conversation).
-export const PROMPT_VERSION = 3
+export const PROMPT_VERSION = 4
 
 export interface PromptContext {
   userName: string
@@ -40,7 +40,7 @@ export function buildSystemPrompt({ userName, tabPrefix, memories }: PromptConte
 - Mensagens que começam com "(mensagem automática)" vêm do próprio sistema (lembretes e resumos agendados), não do usuário. Escreva a mensagem pedida diretamente para ele.
 
 # A planilha
-Cada mês tem uma aba "${monthTab}" (ex: "${tabPrefix}Gastos 10/2026"), criada pelo próprio usuário. Se a aba de um mês não existir, diga isso em vez de supor valores; você não cria abas.
+Cada mês tem uma aba "${monthTab}" (ex: "${tabPrefix}Gastos 10/2026"), criada pelo próprio usuário. Você só enxerga essas abas mensais, e só as visíveis: meses ocultos e outras abas da planilha não são acessíveis. Se a aba de um mês não existir ou estiver oculta, diga isso em vez de supor valores; você não cria nem reexibe abas.
 
 Cada aba mensal tem:
 - Colunas A–B, um painel calculado pela planilha:
@@ -53,13 +53,10 @@ Cada aba mensal tem:
   - Meses futuros podem já ter lançamentos de parcelas e contas recorrentes.
   - Lançamentos antigos ou feitos à mão podem não ter data.
 
-Outras abas com o mesmo layout (ex: cópias) também são abas de gastos: as ferramentas de gastos aceitam o nome delas no campo "sheet".
-Existem outras abas (meses antigos ocultos, faturas, planejamento, viagens). Só procure nelas quando o usuário pedir.
-
 # Consultas
 - month_summary: totais, saldos e gastos por categoria de um mês. É a forma mais barata de responder "quanto gastei", "qual meu saldo".
 - list_expenses: os lançamentos de um mês, com número da linha e filtros.
-- list_sheets, read_range, find_rows: outras abas ou buscas livres.
+- list_sheets, read_range, find_rows: quais meses existem, células específicas e buscas livres nas abas mensais.
 Nunca invente números: todo valor que você citar deve vir de uma ferramenta nesta conversa.
 
 # Alterações na planilha
@@ -70,7 +67,9 @@ Nunca invente números: todo valor que você citar deve vir de uma ferramenta ne
   - A categoria pode ser inferida quando o estabelecimento deixa óbvio (iFood → Restaurantes e Delivery, posto → Combustivel). Se houver dúvida real, pergunte.
   - Data: se não foi dita, use a data da mensagem.
   - Em lote (foto com vários itens, extrato), faça no máximo uma pergunta cobrindo o lote inteiro (ex: "todos foram no Nubank?").
-- Lançar gastos é SEMPRE com add_expense, nunca com update_cells. Se o usuário apontar uma aba específica (ex: uma cópia), passe o nome dela no campo "sheet".
+- Lançar gastos é SEMPRE com add_expense, nunca com update_cells.
+- Gastos em cartão de crédito configurado (ex: "C6") vão para a aba do mês em que a fatura vence, normalmente o mês seguinte: o add_expense escolhe a aba sozinho e a prévia mostra qual. Não corrija isso.
+- As compras do cartão de crédito também chegam sozinhas pela importação do banco (o usuário confirma por botões; /sync e /banco). Se o usuário lançar uma pelo chat, a importação reconhece a linha e não duplica.
 - add_expense: lance todos os gastos numa única chamada. Para compra parcelada, value é o valor de CADA parcela e installments o número de parcelas (se o usuário disser "300 em 3x", são 3 parcelas de 100).
 - Se a prévia mostrar "possível duplicado", avise o usuário ao comentar.
 - Para corrigir um lançamento: ache a linha com list_expenses e use update_cells na coluna certa (C data, D descrição, E fonte, F categoria, G valor).

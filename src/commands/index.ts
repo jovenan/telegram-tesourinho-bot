@@ -7,6 +7,8 @@ export interface CommandContext {
   cancel(): Promise<boolean>
   usageReport(): string
   memoriesReport(): string
+  syncBank(): string
+  bankReport(): string
 }
 
 // Handles slash commands. Returns false when the text is not a known command.
@@ -33,6 +35,12 @@ export async function runCommand(text: string, ctx: CommandContext): Promise<boo
       return true
     case '/memoria':
       await ctx.reply(ctx.memoriesReport())
+      return true
+    case '/sync':
+      await ctx.reply(ctx.syncBank())
+      return true
+    case '/banco':
+      await ctx.reply(ctx.bankReport())
       return true
     default:
       return false

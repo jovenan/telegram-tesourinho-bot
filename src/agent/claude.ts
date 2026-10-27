@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import Anthropic, { toFile } from '@anthropic-ai/sdk'
 import { MAX_OUTPUT_TOKENS, type Effort } from './config'
 import type { ApiTool, Message, MessageParam } from './types'
 
@@ -50,4 +50,23 @@ export function requestCompaction(client: Anthropic, request: StepRequest): Prom
     compaction: { type: 'summarize', instructions: COMPACTION_INSTRUCTIONS },
     betas: BETAS
   })
+}
+
+// Photos and PDFs go to the Files API so the history stores only their id.
+export async function uploadFile(client: Anthropic, bytes: Uint8Array, name: string, mediaType: string): Promise<string> {
+  const file = await client.files.upload({ file: await toFile(bytes, name, { type: mediaType }) })
+  return file.id
+}
+
+// Returns false only when the file could not be deleted (it is retried later); a
+// file that is already gone counts as deleted.
+export async function deleteFile(client: Anthropic, fileId: string): Promise<boolean> {
+  try {
+    await client.files.delete(fileId)
+    return true
+  } catch (error) {
+    if (error instanceof Anthropic.NotFoundError) return true
+    console.warn('Could not delete file', fileId, error)
+    return false
+  }
 }

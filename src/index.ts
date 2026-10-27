@@ -15,7 +15,12 @@ app.post('/webhook', async (c) => {
   const env = c.env
   const secretToken = c.req.header('X-Telegram-Bot-Api-Secret-Token')
 
-  if (env.TELEGRAM_WEBHOOK_SECRET && secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
+  // Fail closed: without the secret configured, nothing is accepted.
+  if (!env.TELEGRAM_WEBHOOK_SECRET) {
+    console.error('TELEGRAM_WEBHOOK_SECRET is not set; refusing webhook updates')
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  if (secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
@@ -53,8 +58,9 @@ export default {
 
   // Proactive messages go to the owner's private chat, whose id is the user id.
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
-    const kind = CRON_JOBS[event.cron.toLowerCase()]
-    if (!kind || !env.ALLOWED_USER_ID) return
-    await env.CHAT.get(env.CHAT.idFromName(env.ALLOWED_USER_ID)).schedule(kind)
+    const kinds = CRON_JOBS[event.cron.toLowerCase()]
+    if (!kinds || !env.ALLOWED_USER_ID) return
+    const chat = env.CHAT.get(env.CHAT.idFromName(env.ALLOWED_USER_ID))
+    for (const kind of kinds) await chat.schedule(kind)
   }
 } satisfies ExportedHandler<Env>

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lt, ne } from 'drizzle-orm'
 import type { Db } from '..'
 import type { MessageParam } from '../../agent/types'
 import { conversations, messages } from '../schema'
@@ -6,8 +6,9 @@ import { conversations, messages } from '../schema'
 export type Conversation = typeof conversations.$inferSelect
 
 // Messages are append-only: Sonnet 5.5 thinking blocks are bound to everything
-// before them, so earlier turns are never edited or removed. A compaction adds a
-// summary message and moves the start of the history to it.
+// before them, so earlier turns are never edited. A compaction adds a summary
+// message and moves the start of the history to it; only what is no longer sent to
+// the model (before the summary, or other conversations) is ever deleted.
 export class ConversationStore {
   constructor(private readonly db: Db) {}
 
@@ -55,6 +56,28 @@ export class ConversationStore {
       .values({ conversationId, role: message.role, content: message.content, createdAt: Date.now() })
       .returning({ id: messages.id })
       .get().id
+  }
+
+  // Messages before the summary are no longer sent to the model.
+  deleteCompacted(conversation: Conversation): void {
+    if (!conversation.summaryMessageId) return
+    this.db
+      .delete(messages)
+      .where(and(eq(messages.conversationId, conversation.id), lt(messages.id, conversation.summaryMessageId)))
+      .run()
+  }
+
+  // Conversations other than `keepId` started before `before`, with their messages.
+  deleteOldConversations(keepId: number | null, before: number): void {
+    const old = this.db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(lt(conversations.startedAt, before), keepId === null ? undefined : ne(conversations.id, keepId)))
+      .all()
+      .map((row) => row.id)
+    if (old.length === 0) return
+    this.db.delete(messages).where(inArray(messages.conversationId, old)).run()
+    this.db.delete(conversations).where(inArray(conversations.id, old)).run()
   }
 
   // Replaces everything sent so far with the signed summary returned by the API.

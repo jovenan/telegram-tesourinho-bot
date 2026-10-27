@@ -11,6 +11,8 @@ export const CHAT_MESSAGES = {
     `/novo - Começar uma conversa nova (esquece o contexto, mantém as preferências)\n` +
     `/memoria - Preferências que guardei\n` +
     `/custo - Gasto com a IA neste mês\n` +
+    `/sync - Buscar agora as compras do cartão\n` +
+    `/banco - Situação da importação do cartão\n` +
     `/cancelar - Interromper o que estiver em andamento\n` +
     `/ajuda - Esta mensagem\n\n` +
     `Fora isso, é só escrever, mandar foto (comprovante, extrato) ou arquivo CSV/PDF.\n` +
@@ -25,7 +27,7 @@ export const CHAT_MESSAGES = {
   refusal: 'Não posso ajudar com isso.',
   emptyReply: '(sem resposta)',
   unsupported: 'Lamento, senhor, mas ainda não sei lidar com esse tipo de mensagem. Texto, foto, CSV ou PDF, por gentileza.',
-  fileTooLarge: 'Esse arquivo é grande demais para mim (máximo ~1,3 MB). Se for imagem, mande como foto (comprimida); se for extrato, prefira CSV.',
+  fileTooLarge: 'Esse arquivo é grande demais para mim (imagens até 5 MB, outros arquivos até 20 MB). Se for imagem, mande como foto (comprimida).',
   fileFailed: '❌ Não consegui baixar o arquivo. Tente mandar de novo.',
   internalError: '❌ Perdão, senhor, algo deu errado. Poderia tentar novamente?',
   apiError: '❌ Perdão, senhor, não consegui pensar agora. Tente de novo em instantes; se persistir, use /novo.',

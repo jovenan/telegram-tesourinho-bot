@@ -1,32 +1,24 @@
 import type { Api } from 'grammy'
 
-// Attachments are sent inline (base64) and stored in the conversation history, whose
-// rows live in Durable Object SQLite (max 2 MB per value). Base64 grows files by a
-// third, so anything above this is refused.
-const MAX_INLINE_FILE_BYTES = 1_300_000
+// Photos and PDFs go to the Files API (the history keeps only their id), so the limit
+// is what Telegram lets bots download. CSVs are parsed and stored as rows.
+const MAX_FILE_BYTES = 20_000_000
+// The Messages API refuses larger images.
+export const MAX_IMAGE_BYTES = 5_000_000
 
 export class FileTooLargeError extends Error {}
 
 export async function downloadFile(api: Api, token: string, fileId: string, apiRoot = 'https://api.telegram.org'): Promise<{ bytes: Uint8Array; path: string }> {
   const file = await api.getFile(fileId)
   if (!file.file_path) throw new Error(`Telegram did not return a path for file ${fileId}`)
-  if (file.file_size && file.file_size > MAX_INLINE_FILE_BYTES) throw new FileTooLargeError()
+  if (file.file_size && file.file_size > MAX_FILE_BYTES) throw new FileTooLargeError()
 
   const response = await fetch(`${apiRoot}/file/bot${token}/${file.file_path}`)
   if (!response.ok) throw new Error(`File download failed: ${response.status}`)
 
   const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength > MAX_INLINE_FILE_BYTES) throw new FileTooLargeError()
+  if (bytes.byteLength > MAX_FILE_BYTES) throw new FileTooLargeError()
   return { bytes, path: file.file_path }
-}
-
-export function toBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunk = 0x8000
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
-  }
-  return btoa(binary)
 }
 
 export type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'

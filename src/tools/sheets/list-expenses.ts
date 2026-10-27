@@ -17,8 +17,8 @@ export const listExpenses = defineTool({
     source: z.string().optional().describe('Filtra pela fonte de saída exata'),
     text: z.string().optional().describe('Filtra por texto contido na descrição')
   }),
-  async execute({ month, sheet, category, source, text }, { spreadsheet }) {
-    const title = expenseTabTitle(spreadsheet, { month, sheet })
+  async execute({ month, category, source, text }, { spreadsheet }) {
+    const title = expenseTabTitle(spreadsheet, { month })
     const all = await spreadsheet.expensesIn(title)
 
     const filtered = all.filter(

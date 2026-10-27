@@ -15,11 +15,12 @@ class_name = "ChatDO"
 tag = "v1"
 new_sqlite_classes = ["ChatDO"]
 
-# Proactive messages (UTC; São Paulo is UTC−3): Saturday 10h reminder, Sunday 19h
-# weekly summary, day 1 at 9h month close. See src/proactive. Use day names: in
-# Cloudflare cron 1 is Sunday and 7 is Saturday (0 is rejected).
+# Scheduled work (UTC; São Paulo is UTC−3): Saturday 10h reminder, Sunday 19h weekly
+# summary, day 1 at 9h month close, and every day at 8h the database cleanup and the
+# card import. See src/proactive. Use day names: in Cloudflare cron 1 is Sunday and 7
+# is Saturday (0 is rejected). The free plan allows 5 crons per account.
 [triggers]
-crons = ["0 13 * * sat", "0 22 * * sun", "0 12 1 * *"]
+crons = ["0 13 * * sat", "0 22 * * sun", "0 12 1 * *", "0 11 * * *"]
 
 # Drizzle migrations (src/db/migrations/*.sql) are bundled as text modules.
 [[rules]]
@@ -39,6 +40,8 @@ ALLOWED_USER_ID = "1"
 TELEGRAM_API_ROOT = "http://localhost:8798"
 SHEETS_SANDBOX_PREFIX = "TESTE "
 MONTHLY_BUDGET_USD = "2"
+# Card import from scripts/dev/fixtures/bank-transactions.json instead of Pluggy.
+BANK_SOURCE = "fake"
 
 [[env.dev.durable_objects.bindings]]
 name = "CHAT"

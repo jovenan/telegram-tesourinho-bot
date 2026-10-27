@@ -5,11 +5,7 @@ import { ToolError } from '../registry'
 export const monthField = z.string().describe('Mês no formato MM/AAAA, ex: 10/2026')
 
 export const tabFields = {
-  month: monthField.optional().describe('Mês no formato MM/AAAA (usa a aba mensal desse mês)'),
-  sheet: z
-    .string()
-    .optional()
-    .describe('Nome exato de outra aba com o mesmo layout de gastos (ex: uma cópia). Use no lugar do mês quando o usuário apontar uma aba específica')
+  month: monthField.describe('Mês no formato MM/AAAA (usa a aba mensal desse mês)')
 }
 
 export function requireMonth(input: string): string {
@@ -18,9 +14,7 @@ export function requireMonth(input: string): string {
   return month
 }
 
-// The expense tab a tool call refers to: an explicit tab name, or the month's tab.
-export function expenseTabTitle(spreadsheet: Spreadsheet, { month, sheet }: { month?: string; sheet?: string }): string {
-  if (sheet) return sheet
-  if (!month) throw new ToolError('Informe o mês (MM/AAAA) ou o nome da aba.')
+// The month tab a tool call refers to.
+export function expenseTabTitle(spreadsheet: Spreadsheet, { month }: { month: string }): string {
   return spreadsheet.monthTabTitle(requireMonth(month))
 }

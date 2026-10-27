@@ -12,8 +12,10 @@ import { MemoryStore } from './db/stores/memories'
 import { RunStateStore, type RunState } from './db/stores/run-state'
 import { SettingsStore } from './db/stores/settings'
 import { UsageStore } from './db/stores/usage'
+import { BankTransactionStore } from './db/stores/bank-transactions'
+import { UploadStore } from './db/stores/uploads'
 import { WriteStore } from './db/stores/writes'
-import { createClaude } from './agent/claude'
+import { createClaude, deleteFile, uploadFile } from './agent/claude'
 import {
   BUDGET_ALERT_RATIO,
   BUDGET_MODEL,
@@ -32,13 +34,15 @@ import { buildSystemPrompt, PROMPT_VERSION } from './agent/prompt'
 import type { ContentBlockParam, MessageParam, PendingApproval, ToolResultBlockParam, Usage } from './agent/types'
 import { runCommand } from './commands'
 import { CHAT_MESSAGES } from './messages'
-import { proactiveAction } from './proactive'
+import { BankImport } from './bank-import'
+import { runMaintenance } from './maintenance'
+import { proactiveAction, type ProactiveKind } from './proactive'
 import { SheetsClient } from './sheets/client'
-import { Spreadsheet } from './sheets/expenses'
+import { monthTabPattern, Spreadsheet } from './sheets/expenses'
 import { createTelegramApi } from './telegram/api'
-import { downloadFile, FileTooLargeError, imageMediaType, sniffImageType, toBase64 } from './telegram/files'
+import { downloadFile, FileTooLargeError, imageMediaType, MAX_IMAGE_BYTES, sniffImageType } from './telegram/files'
 import { escapeHtml, markdownToTelegramHtml, splitMessage } from './telegram/format'
-import { approvalKeyboard, BUDGET_ACTIONS, budgetKeyboard, parseApproval } from './telegram/keyboards'
+import { approvalKeyboard, BUDGET_ACTIONS, budgetKeyboard, parseApproval, parseBankCallback } from './telegram/keyboards'
 import { TOOLS } from './tools'
 import { applyWrite, toolResult, toolsHash, type ToolContext } from './tools/registry'
 import { decodeText, parseCsv } from './utils/csv'
@@ -69,6 +73,8 @@ export class ChatDO extends DurableObject<Env> {
   private readonly files: FileStore
   private readonly writes: WriteStore
   private readonly jobs: JobStore
+  private readonly uploads: UploadStore
+  private readonly bank: BankImport
   private readonly api: Api
   private readonly claude: Anthropic
   private readonly spreadsheet: Spreadsheet
@@ -89,16 +95,31 @@ export class ChatDO extends DurableObject<Env> {
     this.files = new FileStore(db)
     this.writes = new WriteStore(db)
     this.jobs = new JobStore(db)
+    this.uploads = new UploadStore(db)
     this.api = createTelegramApi(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_API_ROOT)
     this.claude = createClaude(env.ANTHROPIC_API_KEY)
     this.spreadsheet = new Spreadsheet(
       new SheetsClient({
         account: { clientEmail: env.GOOGLE_CLIENT_EMAIL, privateKey: env.GOOGLE_PRIVATE_KEY },
         spreadsheetId: env.GOOGLE_SPREADSHEET_ID,
-        writePrefix: env.SHEETS_SANDBOX_PREFIX
+        writePrefix: env.SHEETS_SANDBOX_PREFIX,
+        tabAccess: monthTabPattern(env.SHEETS_SANDBOX_PREFIX)
       }),
       { sandboxPrefix: env.SHEETS_SANDBOX_PREFIX }
     )
+    this.bank = new BankImport({
+      env,
+      api: this.api,
+      claude: this.claude,
+      spreadsheet: this.spreadsheet,
+      transactions: new BankTransactionStore(db),
+      settings: this.settings,
+      jobs: this.jobs,
+      writes: this.writes,
+      memories: this.memories,
+      chatId: () => this.chatId(),
+      recordUsage: (model, usage) => this.recordUsage(this.chatId() ?? Number(env.ALLOWED_USER_ID), model, usage)
+    })
   }
 
   // ── Entry points ─────────────────────────────────────────────────────────────
@@ -235,6 +256,8 @@ export class ChatDO extends DurableObject<Env> {
         },
         cancel: () => this.cancelPending(),
         usageReport: () => this.usageReport(),
+        syncBank: () => this.bank.requestSync(),
+        bankReport: () => this.bank.statusReport(),
         memoriesReport: () => CHAT_MESSAGES.memories(this.memories.list().map((m) => `#${m.id} ${escapeHtml(m.text)}`))
       })
       if (handled) return
@@ -268,8 +291,9 @@ export class ChatDO extends DurableObject<Env> {
     if (message.photo?.length) {
       const largest = message.photo[message.photo.length - 1]
       const { bytes } = await this.download(largest.file_id)
+      const fileId = await this.upload(bytes, 'foto.jpg', sniffImageType(bytes) ?? 'image/jpeg', MAX_IMAGE_BYTES)
       return [
-        { type: 'image', source: { type: 'base64', media_type: sniffImageType(bytes) ?? 'image/jpeg', data: toBase64(bytes) } },
+        { type: 'image', source: { type: 'file', file_id: fileId } },
         { type: 'text', text: `${stamp} (enviou uma foto) ${caption}`.trim() }
       ]
     }
@@ -282,16 +306,18 @@ export class ChatDO extends DurableObject<Env> {
 
       if (image) {
         const { bytes } = await this.download(document.file_id)
+        const fileId = await this.upload(bytes, name, sniffImageType(bytes) ?? image, MAX_IMAGE_BYTES)
         return [
-          { type: 'image', source: { type: 'base64', media_type: sniffImageType(bytes) ?? image, data: toBase64(bytes) } },
+          { type: 'image', source: { type: 'file', file_id: fileId } },
           { type: 'text', text: `${stamp} (enviou a imagem "${name}") ${caption}`.trim() }
         ]
       }
 
       if (mime === 'application/pdf' || name.toLowerCase().endsWith('.pdf')) {
         const { bytes } = await this.download(document.file_id)
+        const fileId = await this.upload(bytes, name, 'application/pdf')
         return [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toBase64(bytes) }, title: name },
+          { type: 'document', source: { type: 'file', file_id: fileId }, title: name },
           { type: 'text', text: `${stamp} (enviou o PDF "${name}") ${caption}`.trim() }
         ]
       }
@@ -317,6 +343,19 @@ export class ChatDO extends DurableObject<Env> {
     throw new UserFacingError(CHAT_MESSAGES.unsupported)
   }
 
+  // Sends a photo or PDF to the Files API and records it for the daily cleanup.
+  private async upload(bytes: Uint8Array, name: string, mediaType: string, maxBytes?: number): Promise<string> {
+    if (maxBytes && bytes.byteLength > maxBytes) throw new UserFacingError(CHAT_MESSAGES.fileTooLarge)
+    try {
+      const fileId = await uploadFile(this.claude, bytes, name, mediaType)
+      this.uploads.add(fileId)
+      return fileId
+    } catch (error) {
+      console.error('File upload failed', error)
+      throw new UserFacingError(CHAT_MESSAGES.fileFailed)
+    }
+  }
+
   private async download(fileId: string) {
     try {
       return await downloadFile(this.api, this.env.TELEGRAM_BOT_TOKEN, fileId, this.env.TELEGRAM_API_ROOT)
@@ -331,6 +370,12 @@ export class ChatDO extends DurableObject<Env> {
     const chatId = query.message?.chat.id
     if (chatId === undefined) {
       await this.api.answerCallbackQuery(query.id).catch(() => {})
+      return
+    }
+
+    const bank = parseBankCallback(query.data)
+    if (bank) {
+      await this.bank.handleCallback(query, bank)
       return
     }
 
@@ -439,7 +484,7 @@ export class ChatDO extends DurableObject<Env> {
   // ── Agent ────────────────────────────────────────────────────────────────────
 
   private toolContext(): ToolContext {
-    return { spreadsheet: this.spreadsheet, memories: this.memories, files: this.files, writes: this.writes, now: new Date() }
+    return { spreadsheet: this.spreadsheet, cards: this.bank.cards, memories: this.memories, files: this.files, writes: this.writes, now: new Date() }
   }
 
   private stepInput(conversation: Conversation): Omit<StepInput, 'toolContext'> {
@@ -629,13 +674,26 @@ export class ChatDO extends DurableObject<Env> {
     if (!job) return
     this.jobs.markProcessed(job.id)
 
+    if (job.kind === 'maintenance') {
+      await this.maintenance()
+      return
+    }
+    if (job.kind === 'bank_fetch' || job.kind === 'bank_process') {
+      try {
+        await (job.kind === 'bank_fetch' ? this.bank.fetch() : this.bank.process())
+      } catch (error) {
+        console.error('Card import failed', job.kind, error)
+      }
+      return
+    }
+
     // In a private chat the chat id is the user id, so jobs work before any message.
     const chatId = this.chatId() ?? Number(this.env.ALLOWED_USER_ID)
     if (!chatId) return
     if (this.chatId() === null) this.settings.set('chat_id', String(chatId))
 
     try {
-      const action = await proactiveAction(job.kind, this.toolContext())
+      const action = await proactiveAction(job.kind as ProactiveKind, this.toolContext())
       if (action.kind === 'message') {
         await this.send(chatId, action.html)
         return
@@ -649,6 +707,26 @@ export class ChatDO extends DurableObject<Env> {
       this.runState.startRun()
     } catch (error) {
       console.error('Proactive job failed', job.kind, error)
+    }
+  }
+
+  private async maintenance(): Promise<void> {
+    try {
+      const { conversationId } = this.runState.get()
+      const more = await runMaintenance({
+        inbox: this.inbox,
+        files: this.files,
+        jobs: this.jobs,
+        writes: this.writes,
+        conversations: this.conversations,
+        uploads: this.uploads,
+        current: conversationId ? this.conversations.get(conversationId) : null,
+        deleteFile: (fileId) => deleteFile(this.claude, fileId),
+        now: Date.now()
+      })
+      if (more && !this.jobs.hasPending('maintenance')) this.jobs.add('maintenance')
+    } catch (error) {
+      console.error('Maintenance failed', error)
     }
   }
 

@@ -11,8 +11,11 @@ O bot deixa de ser um extrator com fluxo fixo e passa a ser um agente com quem s
 | Modelo | `claude-sonnet-5-5`, effort `medium`, thinking adaptativo | Recomendação da doc para chat com tool use. Cache read a 5% do input. |
 | Ferramentas | Schemas zod, portáveis para MCP (`createSdkMcpServer`) | O código resolve abas e colunas; o modelo decide o quê, não o como. |
 | Telegram | `Api` do grammY + `@grammyjs/auto-retry`, resposta em HTML simples | Tipado, roda em Workers. |
-| Acesso | Allowlist com `ALLOWED_USER_ID`; demais usuários são ignorados | Hoje o bot é aberto. |
+| Acesso | Allowlist com `ALLOWED_USER_ID`; demais usuários são ignorados. O webhook recusa tudo se `TELEGRAM_WEBHOOK_SECRET` não estiver configurado | Hoje o bot é aberto. |
+| Planilha | Só as abas `Gastos MM/AAAA` visíveis, com trava central no `SheetsClient` (leitura e escrita) | O resto da planilha não é assunto do bot |
+| Anexos | Fotos e PDFs vão para a Files API; o histórico guarda só o `file_id` | O histórico é append-only; base64 no SQLite crescia sem limite |
 | Proativos | Cron Triggers do Worker (grátis) acionando o DO do chat | |
+| Cartão de crédito | Importação do Meu Pluggy: código determinístico + uma inferência para categorias, com prévia por botões | Ver [IMPORTACAO-CARTAO.md](IMPORTACAO-CARTAO.md) |
 | Banco | Drizzle ORM (`drizzle-orm/durable-sqlite`), migrações geradas pelo `drizzle-kit` | Schema e queries tipados; migrações versionadas aplicadas no start do DO. |
 | Testes | `bun test` para funções puras e para a trava de escrita do Sheets | Já vem com o Bun; sem dependência extra. |
 
@@ -36,8 +39,9 @@ O bot deixa de ser um extrator com fluxo fixo e passa a ser um agente com quem s
 - Desfazer: cada escrita fica registrada (aba, linhas, valores anteriores). "Desfaz o último" reverte, também com aprovação.
 - Parcelas: "300 em 3x" cria `Descrição (1/3)` no mês atual e `(2/3)`, `(3/3)` nas abas seguintes, se existirem; avisa as que faltam.
 - Data do gasto é gravada na coluna C.
+- Gastos em cartão de crédito configurado (`PLUGGY_ACCOUNTS`) vão para a aba do mês em que a fatura vence; a data na coluna C continua a da compra.
 - Lançamentos feitos pelo `add_expense` (inclusive de fotos e CSV) mantêm o sufixo `- AI GENERATED` na descrição.
-- Pode apagar linhas (com aprovação). Nunca apaga, cria ou renomeia abas.
+- Pode apagar lançamentos (com aprovação). Nunca apaga, cria, renomeia ou reexibe abas.
 - Renda (A–B): o agente lê para resumos e saldo, mas só altera quando o usuário pedir explicitamente.
 
 ### Proativos (horário de São Paulo)
@@ -46,10 +50,11 @@ O bot deixa de ser um extrator com fluxo fixo e passa a ser um agente com quem s
 | Sábado 10h | Lembrete para lançar os gastos da semana |
 | Domingo 19h | Resumo semanal por categoria, comparado à semana anterior |
 | Dia 1º, 9h | Fechamento do mês anterior + lembrete de criar a aba nova, se não existir |
+| Todo dia, 8h | Limpeza do banco e importação do cartão (`bank_fetch`) |
 
-Cron em UTC (São Paulo = UTC−3): `0 13 * * sat`, `0 22 * * sun`, `0 12 1 * *`. No Cloudflare, 1 = domingo e 7 = sábado; por isso os nomes dos dias.
+Cron em UTC (São Paulo = UTC−3): `0 13 * * sat`, `0 22 * * sun`, `0 12 1 * *`, `0 11 * * *`. No Cloudflare, 1 = domingo e 7 = sábado; por isso os nomes dos dias. O plano free permite 5 crons por conta.
 
-O resumo semanal depende da data na coluna C. Lançamentos manuais sem data ficam de fora; o resumo informa quantos foram ignorados.
+O resumo semanal depende da data na coluna C. Lançamentos manuais sem data ficam de fora; o resumo informa quantos foram ignorados. Como compras de cartão ficam na aba do mês da fatura, o resumo lê também a aba do mês seguinte.
 
 ### Custo
 - Teto mensal configurável (`MONTHLY_BUDGET_USD`).
@@ -59,8 +64,9 @@ O resumo semanal depende da data na coluna C. Lançamentos manuais sem data fica
 ## Planilha
 
 - Abas mensais `Gastos MM/YYYY`, criadas manualmente e com antecedência. O agente avisa se a aba do mês não existir.
-- Uma aba é "de gastos" pelo **layout**, não pelo nome: cabeçalhos `Data | Gasto | Fonte de saida | Categoria | Valor` em C1:G1. Cópias e abas renomeadas recebem as mesmas regras (validação dos dropdowns, proteção do painel, crescimento da tabela). As ferramentas de gastos aceitam o nome de uma dessas abas no campo `sheet`, no lugar do mês.
-- Abas ocultas (meses antigos, faturas, planejamento etc.) não aparecem em `list_sheets` por padrão; o agente acessa quando o usuário pede pelo nome.
+- O bot só enxerga as abas com o nome exato `Gastos MM/YYYY` (no dev, `TESTE Gastos MM/YYYY`) **e visíveis**. Ocultar um mês corta o acesso a ele; cópias, abas renomeadas e qualquer outra aba ficam de fora. A regra vale nas ferramentas (`Spreadsheet`) e numa trava central do `SheetsClient` (`tabAccess`), que bloqueia leitura e escrita antes do request.
+- O layout (cabeçalhos `Data | Gasto | Fonte de saida | Categoria | Valor` em C1:G1) ainda é conferido antes de ler ou escrever a tabela.
+- A trava é no código: a service account continua editora da planilha inteira, então a planilha deve ser a única coisa compartilhada com ela.
 - Cada aba tem duas áreas:
 
 **A–B: painel do mês**
@@ -116,13 +122,12 @@ O webhook não agenda alarm enquanto um passo está em execução; o próprio pa
 | Ferramenta | Tipo | Observações |
 |---|---|---|
 | `month_summary`, `list_expenses`, `list_options` | leitura | painel, lançamentos com filtros, dropdowns |
-| `list_sheets`, `read_range`, `find_rows` | leitura | outras abas; ocultas só quando pedido |
+| `list_sheets`, `read_range`, `find_rows` | leitura | só abas mensais visíveis |
 | `read_file` | leitura | linhas de um CSV recebido, em blocos de 100 |
-| `add_expense` | escrita | lote; valida fonte/categoria contra o dropdown, data em C, sufixo, parcelas, avisa duplicados |
-| `update_cells` | escrita | em abas mensais só C–G e A2:B5; valida dropdowns |
+| `add_expense` | escrita | lote; valida fonte/categoria contra o dropdown, data em C, sufixo, parcelas, avisa duplicados, aba da fatura para cartões |
+| `update_cells` | escrita | só C–G e A2:B5; valida dropdowns |
 | `delete_expenses` | escrita | limpa C–G das linhas (não mexe no painel) |
 | `add_income` | escrita | primeira linha livre de A2:B5, só quando pedido |
-| `append_rows`, `delete_rows` | escrita | apenas abas não mensais |
 | `undo_last_write` | escrita | reverte a última escrita registrada |
 | `remember`, `forget`, `list_memories` | memória | sem aprovação |
 
@@ -131,7 +136,7 @@ Ferramentas de escrita têm duas fases:
 - `apply` roda depois do ✅. Ele confere que as células não mudaram desde a prévia, grava e devolve as operações para desfazer.
 
 Anexos:
-- **Fotos e PDFs** entram como blocos de imagem/documento na mensagem do usuário. O limite é ~1,3 MB por arquivo, porque o histórico fica no SQLite do DO, que aceita no máximo 2 MB por valor, e o base64 aumenta o tamanho.
+- **Fotos e PDFs** vão para a Files API da Anthropic (`client.files.upload`) e entram na mensagem do usuário como blocos com `source: { type: "file", file_id }`. O histórico guarda só o id; o limite é o do Telegram para bots (20 MB), e imagens até 5 MB. A tabela `uploads` registra os arquivos para a limpeza diária.
 - **CSVs** são lidos pelo código e guardados na tabela `files`. O modelo recebe o id e uma amostra, lê o resto com `read_file` e propõe o lançamento com `add_expense`.
 - Foi descartado um `import_csv` com mapeamento de colunas: a categorização por linha precisa do modelo de qualquer forma.
 
@@ -164,9 +169,25 @@ Anexos:
 | `memories` | memória de longo prazo |
 | `files` | CSVs recebidos |
 | `writes` | log de escritas com as operações para desfazer |
-| `jobs` | mensagens proativas aguardando o chat ficar livre |
+| `jobs` | proativos, limpeza e importação do cartão aguardando o chat ficar livre |
+| `uploads` | arquivos enviados à Files API (apagados quando saem do histórico ativo) |
+| `bank_transactions` | transações do cartão vistas pelo import (nunca apagadas) |
 | `usage` | tokens e custo por mês (`/custo`, alerta de 80%) |
-| `settings` | chat id, nome do usuário, teto e modelo escolhidos no alerta |
+| `settings` | chat id, nome do usuário, teto e modelo escolhidos no alerta; estado do import do cartão (último sync, lote aberto, avisos) |
+
+### Limpeza diária
+
+O job `maintenance` (cron das 8h) apaga o que não é mais usado:
+
+| O quê | Regra |
+|---|---|
+| `inbox` | updates processados há mais de 7 dias |
+| `files` (CSVs) | recebidos há mais de 30 dias |
+| `jobs` | processados há mais de 30 dias |
+| `writes` | mais de 90 dias |
+| `messages` da conversa atual | anteriores ao resumo da compactação (não são mais enviadas) |
+| `conversations` + `messages` | conversas que não são a atual, com mais de 90 dias |
+| `uploads` | arquivos fora do histórico ativo da conversa atual são apagados na Anthropic (até 40 por execução; o resto em outra execução) |
 
 ## Arquivos
 
@@ -174,6 +195,8 @@ Anexos:
 src/
   index.ts              Worker: webhook (secret, allowlist, chat privado) e crons → DO
   chat-do.ts            Durable Object: fila, passos, aprovações, anexos, jobs, custo
+  bank-import.ts        importação do cartão: jobs, prévia do lote, revisão, /sync e /banco
+  maintenance.ts        limpeza diária do banco e dos arquivos na Files API
   types.ts              Env
   messages.ts           textos fixos do bot (pt-BR)
 
@@ -187,6 +210,9 @@ src/
     loop.ts             runStep(): chama o modelo, roda leituras, separa escritas
     prompt.ts           system prompt (congelado por conversa)
     cost.ts             usage → US$
+
+  bank/                 importação do cartão sem Telegram nem DO: fatura, filtro, match, categorias, lote
+  pluggy/               cliente do Meu Pluggy (só leitura) e BankSource
 
   tools/                cada ferramenta = schema zod + execute (leitura) ou prepare/apply (escrita)
     registry.ts
@@ -241,7 +267,7 @@ Princípios:
 
 | Ambiente | Onde | Telegram | Planilha |
 |---|---|---|---|
-| `dev` | `wrangler dev` local | falso (`scripts/dev/fake-telegram.ts`) | só abas `TESTE ` (`SHEETS_SANDBOX_PREFIX`) |
+| `dev` | `wrangler dev` local | falso (`scripts/dev/fake-telegram.ts`) | só abas `TESTE ` (`SHEETS_SANDBOX_PREFIX`); cartão com fonte falsa (`BANK_SOURCE = "fake"`) |
 | `staging` | Worker `telegram-api-bot-staging` | bot de teste | planilha real, todas as abas; Workers Logs ligado; sem crons |
 | produção | Worker `telegram-api-bot` | bot real | planilha real; crons ligados |
 
