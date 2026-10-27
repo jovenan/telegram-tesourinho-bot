@@ -1,10 +1,11 @@
 # Assistente de finanças no Telegram
 
-Bot pessoal de Telegram com um agente Claude, o **Grana** (um mordomo financeiro), que conversa livremente e cuida da planilha de gastos no Google Sheets: lança gastos (texto, foto de comprovante, PDF, extrato CSV), responde perguntas sobre os números, corrige e desfaz lançamentos e manda resumos semanais e mensais.
+Bot pessoal de Telegram com um agente Claude, o **Grana** (um mordomo financeiro), que conversa livremente e cuida da planilha de gastos no Google Sheets: lança gastos (texto, foto de comprovante, PDF, extrato CSV), importa as compras do cartão de crédito pelo Meu Pluggy, responde perguntas sobre os números, corrige e desfaz lançamentos e manda resumos semanais e mensais.
 
 Toda alteração na planilha passa por uma prévia com botões ✅/❌ antes de ser gravada.
 
 - Arquitetura e decisões: [docs/ARQUITETURA.md](docs/ARQUITETURA.md)
+- Importação do cartão (Pluggy): [docs/IMPORTACAO-CARTAO.md](docs/IMPORTACAO-CARTAO.md)
 - Ambiente de desenvolvimento e testes: [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md)
 
 ## Como funciona
@@ -31,14 +32,15 @@ Telegram ─► Worker (Cloudflare, plano free) ─► Durable Object por chat (
 | "muda o Cinemark para Presentes", "apaga o Uber", "desfaz" | edição, remoção e desfazer, sempre com prévia |
 | "quanto gastei com mercado?", "compara com setembro" | lê o painel e os lançamentos do mês |
 | "lembra que Uber é sempre Transporte no C6" | preferência guardada para as próximas conversas |
+| compras do cartão (automático, todo dia ou `/sync`) | prévia do lote com categoria sugerida; o que já está na planilha é reconhecido; "Gravar sugeridos" ou revisão item a item |
 
-Proativos (horário de São Paulo): lembrete no sábado às 10h, resumo semanal no domingo às 19h e fechamento do mês no dia 1º às 9h.
+Proativos (horário de São Paulo): lembrete no sábado às 10h, resumo semanal no domingo às 19h, fechamento do mês no dia 1º às 9h, e todo dia às 8h a limpeza do banco e a importação do cartão.
 
-Comandos: `/novo`, `/memoria`, `/custo`, `/cancelar`, `/ajuda`.
+Comandos: `/novo`, `/memoria`, `/custo`, `/sync`, `/banco`, `/cancelar`, `/ajuda`.
 
 ## Planilha esperada
 
-Uma aba por mês chamada `Gastos MM/AAAA`, com o painel em A–B (Renda, Gastos, Saldos) e a tabela de gastos em C–G (`Data | Gasto | Fonte de saida | Categoria | Valor`), com dropdowns de fonte e categoria. Detalhes em [docs/ARQUITETURA.md](docs/ARQUITETURA.md#planilha).
+Uma aba por mês chamada `Gastos MM/AAAA` (o bot só enxerga essas abas, e só as visíveis), com o painel em A–B (Renda, Gastos, Saldos) e a tabela de gastos em C–G (`Data | Gasto | Fonte de saida | Categoria | Valor`), com dropdowns de fonte e categoria. Detalhes em [docs/ARQUITETURA.md](docs/ARQUITETURA.md#planilha).
 
 ## Configuração
 
@@ -59,6 +61,12 @@ bun run secret ANTHROPIC_API_KEY
 bun run secret GOOGLE_CLIENT_EMAIL
 bun run secret GOOGLE_PRIVATE_KEY
 bun run secret GOOGLE_SPREADSHEET_ID
+
+# importação do cartão (opcional; ver docs/IMPORTACAO-CARTAO.md)
+bun run secret PLUGGY_CLIENT_ID
+bun run secret PLUGGY_CLIENT_SECRET
+bun run secret PLUGGY_ITEM_IDS          # ids das conexões do Meu Pluggy, separados por vírgula
+bun run secret PLUGGY_ACCOUNTS          # {"<accountId>": {"source": "C6", "dueDay": 5, "closingDaysBeforeDue": 7}}
 
 # aponta o bot para o Worker e registra o menu de comandos
 TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... \

@@ -61,6 +61,28 @@ bunx wrangler dev --env dev --test-scheduled --var TELEGRAM_BOT_TOKEN:dev --var 
 
 Os crons são disparados com `bun run dev:chat --cron "<expressão>"` (ver `src/proactive`). Como em chat privado o id do chat é o id do usuário, eles vão para o chat `1`.
 
+## Importação do cartão
+
+No env `dev`, `BANK_SOURCE = "fake"` troca o Pluggy por `scripts/dev/fixtures/bank-transactions.json`: transações sintéticas com datas relativas a hoje, no cartão `fake-c6` (fonte `C6`). Elas incluem compras repetidas, estabelecimentos opacos, uma parcela, uma compra pendente, um pagamento de fatura e um estorno (os três últimos são filtrados).
+
+```bash
+bun run dev:chat "/sync"                         # busca e manda a prévia do lote
+bun run dev:chat --click bank:save:<token>       # botões do lote e da revisão (callback_data impresso)
+bun run dev:chat "/banco"                        # situação da importação
+bun run dev:chat --cron "0 11 * * *"             # limpeza + sync, como o cron diário
+```
+
+As compras vão para a aba do mês da fatura, então as abas `TESTE` do mês seguinte precisam existir (`dev:sheets:setup`). Para recomeçar do zero, use `--new-chat` (outro Durable Object) ou apague `.wrangler/state/v3/do/`.
+
+Para olhar a conexão real do Meu Pluggy sem gravar nada, ponha `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET` e `PLUGGY_ITEM_IDS` no `.dev.vars` e rode a sonda:
+
+```bash
+bun scripts/dev/pluggy-probe.ts          # contas, status, quais campos vêm preenchidos
+bun scripts/dev/pluggy-probe.ts --full   # também lista as transações do cartão (só no seu terminal)
+```
+
+Ela mostra os ids das contas de crédito para o `PLUGGY_ACCOUNTS`. Não cole a saída do `--full` em lugar nenhum: são dados reais.
+
 ## Bot de teste (staging)
 
 Um segundo bot do Telegram (criado no @BotFather só para testes) aponta para o Worker `telegram-api-bot-staging`, com Telegram, Cloudflare e planilha reais. Escritas continuam passando pela aprovação no chat.
