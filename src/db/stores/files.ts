@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, lt } from 'drizzle-orm'
 import type { Db } from '..'
 import { files } from '../schema'
 
@@ -13,5 +13,9 @@ export class FileStore {
 
   get(id: string): StoredFile | null {
     return this.db.select().from(files).where(eq(files.id, id)).get() ?? null
+  }
+
+  deleteBefore(before: number): void {
+    this.db.delete(files).where(lt(files.createdAt, before)).run()
   }
 }

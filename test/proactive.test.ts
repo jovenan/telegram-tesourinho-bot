@@ -27,7 +27,7 @@ test('today is São Paulo time', () => {
 })
 
 test('crons match wrangler.toml and use day names', async () => {
-  expect(Object.values(CRON_JOBS).sort()).toEqual(['month_close', 'weekly_reminder', 'weekly_summary'])
+  expect(Object.values(CRON_JOBS).flat().sort()).toEqual(['bank_fetch', 'maintenance', 'month_close', 'weekly_reminder', 'weekly_summary'])
   const toml = await Bun.file(new URL('../wrangler.toml', import.meta.url)).text()
   const configured = JSON.parse(toml.match(/^crons = (\[.*\])$/m)![1])
   expect(configured.sort()).toEqual(Object.keys(CRON_JOBS).sort())

@@ -1,4 +1,4 @@
-import { asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull, lt } from 'drizzle-orm'
 import type { Db } from '..'
 import { jobs } from '../schema'
 
@@ -25,5 +25,14 @@ export class JobStore {
 
   markProcessed(id: number): void {
     this.db.update(jobs).set({ processedAt: Date.now() }).where(eq(jobs.id, id)).run()
+  }
+
+  // A job of this kind still waiting to run (so a second one is not queued).
+  hasPending(kind: JobKind): boolean {
+    return this.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.kind, kind), isNull(jobs.processedAt))).get() !== undefined
+  }
+
+  deleteProcessedBefore(before: number): void {
+    this.db.delete(jobs).where(and(isNotNull(jobs.processedAt), lt(jobs.processedAt, before))).run()
   }
 }

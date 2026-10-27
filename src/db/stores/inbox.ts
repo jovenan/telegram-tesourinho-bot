@@ -1,4 +1,4 @@
-import { asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull, lt } from 'drizzle-orm'
 import type { Update } from 'grammy/types'
 import type { Db } from '..'
 import { inbox } from '../schema'
@@ -37,5 +37,10 @@ export class InboxStore {
 
   markProcessed(updateId: number): void {
     this.db.update(inbox).set({ processedAt: Date.now() }).where(eq(inbox.updateId, updateId)).run()
+  }
+
+  // Processed updates are only kept for redelivery dedupe, which is short-lived.
+  deleteProcessedBefore(before: number): void {
+    this.db.delete(inbox).where(and(isNotNull(inbox.processedAt), lt(inbox.processedAt, before))).run()
   }
 }

@@ -58,8 +58,9 @@ export default {
 
   // Proactive messages go to the owner's private chat, whose id is the user id.
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
-    const kind = CRON_JOBS[event.cron.toLowerCase()]
-    if (!kind || !env.ALLOWED_USER_ID) return
-    await env.CHAT.get(env.CHAT.idFromName(env.ALLOWED_USER_ID)).schedule(kind)
+    const kinds = CRON_JOBS[event.cron.toLowerCase()]
+    if (!kinds || !env.ALLOWED_USER_ID) return
+    const chat = env.CHAT.get(env.CHAT.idFromName(env.ALLOWED_USER_ID))
+    for (const kind of kinds) await chat.schedule(kind)
   }
 } satisfies ExportedHandler<Env>

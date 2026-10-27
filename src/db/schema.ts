@@ -89,10 +89,18 @@ export const files = sqliteTable('files', {
   createdAt: integer('created_at').notNull()
 })
 
-// Proactive messages fired by cron, run when the chat is idle.
+// Work fired by cron or commands (proactive messages, maintenance, card import), run when the chat is idle.
 export const jobs = sqliteTable('jobs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  kind: text('kind', { enum: ['weekly_reminder', 'weekly_summary', 'month_close'] }).notNull(),
+  kind: text('kind', { enum: ['weekly_reminder', 'weekly_summary', 'month_close', 'maintenance', 'bank_fetch', 'bank_process'] }).notNull(),
   createdAt: integer('created_at').notNull(),
   processedAt: integer('processed_at')
+})
+
+// Photos and PDFs sent to the Files API; messages keep only the file id. Lets the
+// daily maintenance delete files no longer referenced by the active history.
+export const uploads = sqliteTable('uploads', {
+  fileId: text('file_id').primaryKey(),
+  createdAt: integer('created_at').notNull(),
+  deletedAt: integer('deleted_at')
 })
