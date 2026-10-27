@@ -16,6 +16,10 @@ export interface SheetsClientOptions {
   // When set, every write must target a sheet whose title starts with this prefix.
   // Used in development so the real tabs can never be modified.
   writePrefix?: string
+  // When set, every read and write must target a visible sheet whose title matches.
+  // The Worker passes the monthly-tab pattern so no other tab is ever touched, even
+  // if a tool forgets to check.
+  tabAccess?: RegExp
 }
 
 export type CellValue = string | number | boolean
@@ -25,6 +29,13 @@ export class SheetsWriteBlockedError extends Error {
   constructor(title: string, prefix: string) {
     super(`Write blocked: sheet "${title}" does not start with "${prefix}"`)
     this.name = 'SheetsWriteBlockedError'
+  }
+}
+
+export class SheetsAccessBlockedError extends Error {
+  constructor(title: string) {
+    super(`Access blocked: sheet "${title}" is hidden or is not a monthly tab`)
+    this.name = 'SheetsAccessBlockedError'
   }
 }
 
@@ -65,6 +76,7 @@ export class SheetsClient {
   }
 
   async getValues(range: string, render: 'FORMATTED_VALUE' | 'UNFORMATTED_VALUE' | 'FORMULA' = 'FORMATTED_VALUE'): Promise<CellValue[][]> {
+    await this.assertAccessible([parseSheetTitle(range)])
     const data = await this.request<{ values?: CellValue[][] }>(
       'GET',
       `/values/${encodeURIComponent(range)}?valueRenderOption=${render}`
@@ -73,6 +85,7 @@ export class SheetsClient {
   }
 
   async getDataValidation(range: string): Promise<Array<{ row: number; column: number; rule: unknown }>> {
+    await this.assertAccessible([parseSheetTitle(range)])
     const data = await this.request<{ sheets?: Array<{ data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: Array<{ dataValidation?: unknown }> }> }> }> }>(
       'GET',
       `?ranges=${encodeURIComponent(range)}&fields=sheets(data(startRow,startColumn,rowData.values.dataValidation))`
@@ -95,22 +108,22 @@ export class SheetsClient {
 
   async updateValues(range: string, values: CellValue[][]): Promise<void> {
     this.assertWritable(parseSheetTitle(range))
+    await this.assertAccessible([parseSheetTitle(range)])
     await this.request('PUT', `/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`, { values })
   }
 
   async clearValues(range: string): Promise<void> {
     this.assertWritable(parseSheetTitle(range))
+    await this.assertAccessible([parseSheetTitle(range)])
     await this.request('POST', `/values/${encodeURIComponent(range)}:clear`, {})
   }
 
   async batchUpdate(requests: BatchUpdateRequest[]): Promise<{ replies?: any[] }> {
-    if (this.options.writePrefix) {
+    if (this.options.writePrefix || this.options.tabAccess) {
       const titles = new Map((await this.listSheets()).map((sheet) => [sheet.sheetId, sheet.title]))
-      for (const request of requests) {
-        for (const title of targetTitles(request, titles)) {
-          this.assertWritable(title)
-        }
-      }
+      const targets = requests.flatMap((request) => targetTitles(request, titles))
+      for (const title of targets) this.assertWritable(title)
+      await this.assertAccessible(targets)
     }
 
     try {
@@ -128,6 +141,17 @@ export class SheetsClient {
     const prefix = this.options.writePrefix
     if (prefix && !title.startsWith(prefix)) {
       throw new SheetsWriteBlockedError(title, prefix)
+    }
+  }
+
+  // Uses the cached tab list, so it rarely costs a request of its own.
+  private async assertAccessible(titles: string[]): Promise<void> {
+    const pattern = this.options.tabAccess
+    if (!pattern) return
+    const sheets = await this.listSheets()
+    for (const title of titles) {
+      const sheet = sheets.find((candidate) => candidate.title === title)
+      if (!pattern.test(title) || !sheet || sheet.hidden) throw new SheetsAccessBlockedError(title)
     }
   }
 

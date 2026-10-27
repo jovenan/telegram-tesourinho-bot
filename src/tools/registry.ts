@@ -4,7 +4,8 @@ import type { FileStore } from '../db/stores/files'
 import type { MemoryStore } from '../db/stores/memories'
 import type { WriteStore } from '../db/stores/writes'
 import type { Spreadsheet } from '../sheets/expenses'
-import { NotExpenseTabError, SheetNotFoundError } from '../sheets/expenses'
+import { NotExpenseTabError, SheetNotFoundError, TabNotAllowedError } from '../sheets/expenses'
+import { SheetsAccessBlockedError } from '../sheets/client'
 import type { UndoOp } from '../sheets/undo'
 
 export interface ToolContext {
@@ -96,7 +97,11 @@ export function toolResult(toolUseId: string, content: string, isError = false):
 }
 
 function errorMessage(error: unknown, toolName: string): string {
-  if (error instanceof ToolError || error instanceof SheetNotFoundError || error instanceof NotExpenseTabError) return error.message
+  if (error instanceof ToolError || error instanceof SheetNotFoundError || error instanceof NotExpenseTabError || error instanceof TabNotAllowedError) {
+    return error.message
+  }
+  // A tool reached past the tab rule: the client guard stopped it before any request.
+  if (error instanceof SheetsAccessBlockedError) return 'Essa aba não está acessível: só as abas mensais "Gastos MM/AAAA" visíveis.'
   console.error(`Tool ${toolName} failed`, error)
   return `Erro ao executar ${toolName}: ${error instanceof Error ? error.message : String(error)}`
 }

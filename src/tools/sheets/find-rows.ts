@@ -8,10 +8,10 @@ const MAX_RESULTS = 40
 export const findRows = defineTool({
   name: 'find_rows',
   description:
-    'Procura um texto (sem diferenciar maiúsculas e acentos) em todas as células de uma aba e retorna as linhas encontradas com o número da linha.',
+    'Procura um texto (sem diferenciar maiúsculas e acentos) em todas as células de uma aba mensal e retorna as linhas encontradas com o número da linha.',
   kind: 'read',
   input: z.strictObject({
-    sheet: z.string().describe('Nome exato da aba'),
+    sheet: z.string().describe('Nome exato da aba mensal'),
     text: z.string().describe('Texto a procurar')
   }),
   async execute({ sheet, text }, { spreadsheet }) {

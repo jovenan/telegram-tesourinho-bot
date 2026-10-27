@@ -7,10 +7,10 @@ const MAX_CELLS = 1500
 export const readRange = defineTool({
   name: 'read_range',
   description:
-    'Lê um intervalo de qualquer aba em notação A1 (sem o nome da aba), ex: "A1:G40". Use para abas que não seguem o formato mensal ou para ver células específicas. Para gastos do mês prefira list_expenses ou month_summary.',
+    'Lê um intervalo de uma aba mensal em notação A1 (sem o nome da aba), ex: "A1:G40", para ver células específicas. Para gastos do mês prefira list_expenses ou month_summary.',
   kind: 'read',
   input: z.strictObject({
-    sheet: z.string().describe('Nome exato da aba, como retornado por list_sheets'),
+    sheet: z.string().describe('Nome exato da aba mensal, como retornado por list_sheets'),
     range: z.string().describe('Intervalo A1 sem o nome da aba, ex: "A1:G40"')
   }),
   async execute({ sheet, range }, { spreadsheet }) {

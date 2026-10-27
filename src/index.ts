@@ -15,7 +15,12 @@ app.post('/webhook', async (c) => {
   const env = c.env
   const secretToken = c.req.header('X-Telegram-Bot-Api-Secret-Token')
 
-  if (env.TELEGRAM_WEBHOOK_SECRET && secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
+  // Fail closed: without the secret configured, nothing is accepted.
+  if (!env.TELEGRAM_WEBHOOK_SECRET) {
+    console.error('TELEGRAM_WEBHOOK_SECRET is not set; refusing webhook updates')
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  if (secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 

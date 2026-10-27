@@ -13,15 +13,15 @@ interface Plan {
 export const deleteExpenses = defineWriteTool({
   name: 'delete_expenses',
   description:
-    'Apaga lançamentos da tabela de gastos de um mês ou de uma aba de gastos (limpa C–G das linhas indicadas, sem mexer no painel A–B). Use os números de linha de list_expenses. O usuário aprova antes.',
+    'Apaga lançamentos da tabela de gastos de um mês (limpa C–G das linhas indicadas, sem mexer no painel A–B). Use os números de linha de list_expenses. O usuário aprova antes.',
   kind: 'write',
   input: z.strictObject({
     ...tabFields,
     rows: z.array(z.number().int()).describe('Números das linhas a apagar')
   }),
 
-  async prepare({ month, sheet, rows }, { spreadsheet }) {
-    const tab = expenseTabTitle(spreadsheet, { month, sheet })
+  async prepare({ month, rows }, { spreadsheet }) {
+    const tab = expenseTabTitle(spreadsheet, { month })
     const unique = [...new Set(rows)].sort((a, b) => a - b)
     if (unique.length === 0) throw new ToolError('Nenhuma linha informada.')
     if (unique.length > MAX_DELETE_ROWS) throw new ToolError(`Máximo de ${MAX_DELETE_ROWS} linhas por vez.`)

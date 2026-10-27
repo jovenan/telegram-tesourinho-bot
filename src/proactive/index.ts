@@ -110,12 +110,12 @@ Lançamentos sem data nas abas desses meses (ficaram fora do resumo): ${undated}
   const currentMonth = monthLabelOf(day)
   const hasLastMonth = await spreadsheet.hasTab(spreadsheet.monthTabTitle(lastMonth))
   const hasCurrentMonth = await spreadsheet.hasTab(spreadsheet.monthTabTitle(currentMonth))
-  const summary = hasLastMonth ? await monthSummary.execute({ month: lastMonth }, ctx) : `A aba de ${lastMonth} não existe.`
+  const summary = hasLastMonth ? await monthSummary.execute({ month: lastMonth }, ctx) : `A aba de ${lastMonth} não existe ou está oculta.`
 
   return {
     kind: 'agent',
     prompt: `É o primeiro dia do mês. Escreva o fechamento de ${lastMonth} para o usuário: total gasto, saldo, categorias que mais pesaram e um comentário útil. Seja breve.
-${hasCurrentMonth ? `A aba de ${currentMonth} já existe.` : `A aba "${spreadsheet.monthTabTitle(currentMonth)}" ainda NÃO existe: lembre o usuário de criá-la para poder lançar os gastos do mês.`}
+${hasCurrentMonth ? `A aba de ${currentMonth} já existe.` : `A aba "${spreadsheet.monthTabTitle(currentMonth)}" NÃO existe ou está oculta: lembre o usuário de criá-la (ou reexibi-la) para poder lançar os gastos do mês.`}
 
 Dados de ${lastMonth}:
 ${summary}`

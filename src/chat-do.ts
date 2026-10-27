@@ -34,7 +34,7 @@ import { runCommand } from './commands'
 import { CHAT_MESSAGES } from './messages'
 import { proactiveAction } from './proactive'
 import { SheetsClient } from './sheets/client'
-import { Spreadsheet } from './sheets/expenses'
+import { monthTabPattern, Spreadsheet } from './sheets/expenses'
 import { createTelegramApi } from './telegram/api'
 import { downloadFile, FileTooLargeError, imageMediaType, sniffImageType, toBase64 } from './telegram/files'
 import { escapeHtml, markdownToTelegramHtml, splitMessage } from './telegram/format'
@@ -95,7 +95,8 @@ export class ChatDO extends DurableObject<Env> {
       new SheetsClient({
         account: { clientEmail: env.GOOGLE_CLIENT_EMAIL, privateKey: env.GOOGLE_PRIVATE_KEY },
         spreadsheetId: env.GOOGLE_SPREADSHEET_ID,
-        writePrefix: env.SHEETS_SANDBOX_PREFIX
+        writePrefix: env.SHEETS_SANDBOX_PREFIX,
+        tabAccess: monthTabPattern(env.SHEETS_SANDBOX_PREFIX)
       }),
       { sandboxPrefix: env.SHEETS_SANDBOX_PREFIX }
     )

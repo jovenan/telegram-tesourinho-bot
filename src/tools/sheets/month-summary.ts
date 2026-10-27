@@ -9,8 +9,8 @@ export const monthSummary = defineTool({
     'Resumo de um mês: o painel da planilha (Renda, totais de Gastos por fonte e Saldos, calculados pela própria planilha) e os totais por categoria. Use para perguntas de totais, saldo e "quanto gastei".',
   kind: 'read',
   input: z.strictObject(tabFields),
-  async execute({ month, sheet }, { spreadsheet }) {
-    const title = expenseTabTitle(spreadsheet, { month, sheet })
+  async execute({ month }, { spreadsheet }) {
+    const title = expenseTabTitle(spreadsheet, { month })
     const [panel, expenses] = await Promise.all([spreadsheet.panelIn(title), spreadsheet.expensesIn(title)])
 
     const lines = [title]
